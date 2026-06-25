@@ -1,0 +1,54 @@
+# =============================================================================
+# Prometheus Configuration
+# =============================================================================
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  scrape_timeout:      10s
+  external_labels:
+    environment: production
+    platform:    trading
+
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+
+  # Trading Core — main application metrics
+  - job_name: trading-core
+    static_configs:
+      - targets: ["trading-core:8001"]
+    metrics_path: /metrics
+    scrape_interval: 5s       # More frequent for low-latency trading metrics
+
+  # FastAPI gateway
+  - job_name: trading-api
+    static_configs:
+      - targets: ["fastapi:8000"]
+    metrics_path: /metrics
+
+  # Redis
+  - job_name: redis
+    static_configs:
+      - targets: ["redis:6379"]
+
+  # PostgreSQL (via postgres_exporter — add to docker-compose if needed)
+  # - job_name: postgres
+  #   static_configs:
+  #     - targets: ["postgres-exporter:9187"]
+
+  # Node exporter
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # Prometheus self-scrape
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

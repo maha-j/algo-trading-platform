@@ -1,0 +1,135 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # Portfolio Risk Alerts
+  # ---------------------------------------------------------------------------
+  - name: portfolio_risk
+    rules:
+
+      - alert: DrawdownExceeds10Pct
+        expr: trading_risk_drawdown_pct > 10
+        for: 0m
+        labels:
+          severity: warning
+          team: trading
+        annotations:
+          summary: "Portfolio drawdown exceeds 10%"
+          description: "Current drawdown: {{ $value | printf \"%.2f\" }}%. Immediate review required."
+
+      - alert: DrawdownExceeds15Pct
+        expr: trading_risk_drawdown_pct > 15
+        for: 0m
+        labels:
+          severity: critical
+          team: trading
+        annotations:
+          summary: "CRITICAL: Portfolio drawdown exceeds 15% — circuit breaker may have fired"
+          description: "Current drawdown: {{ $value | printf \"%.2f\" }}%. All strategies should be halted."
+
+      - alert: CircuitBreakerOpen
+        expr: trading_circuit_breaker_open == 1
+        for: 0m
+        labels:
+          severity: critical
+          team: trading
+        annotations:
+          summary: "Trading circuit breaker is OPEN — all trading halted"
+          description: "Manual intervention required to reset the circuit breaker."
+
+      - alert: VaRExceedsThreshold
+        expr: trading_risk_var_99_usd > 5000
+        for: 5m
+        labels:
+          severity: warning
+          team: risk
+        annotations:
+          summary: "99% VaR exceeds $5,000"
+          description: "Current VaR: ${{ $value | printf \"%.0f\" }}. Review position sizing."
+
+  # ---------------------------------------------------------------------------
+  # Execution Quality Alerts
+  # ---------------------------------------------------------------------------
+  - name: execution
+    rules:
+
+      - alert: HighSlippage
+        expr: histogram_quantile(0.95, rate(trading_execution_slippage_bps_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: execution
+        annotations:
+          summary: "P95 slippage exceeds 5bps"
+          description: "95th percentile slippage: {{ $value | printf \"%.2f\" }} bps over the last 5 minutes."
+
+      - alert: OrderRoundTripSlow
+        expr: histogram_quantile(0.99, rate(trading_execution_round_trip_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: execution
+        annotations:
+          summary: "P99 order round-trip exceeds 2 seconds"
+          description: "99th pct round-trip: {{ $value | printf \"%.3f\" }}s. Check broker connectivity."
+
+  # ---------------------------------------------------------------------------
+  # System Health Alerts
+  # ---------------------------------------------------------------------------
+  - name: system
+    rules:
+
+      - alert: APIHighErrorRate
+        expr: rate(trading_api_requests_total{status_code=~"5.."}[5m]) / rate(trading_api_requests_total[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: error
+          team: platform
+        annotations:
+          summary: "API 5xx error rate exceeds 1%"
+          description: "Error rate: {{ $value | printf \"%.2f%%\" }}. Check application logs."
+
+      - alert: APILatencyHigh
+        expr: histogram_quantile(0.99, rate(trading_api_request_latency_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "API P99 latency exceeds 1 second"
+
+      - alert: TradingCorePlatformDown
+        expr: up{job="trading-core"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Trading core service is DOWN"
+          description: "The trading-core service has been unreachable for 1+ minute. All trading is halted."
+
+      - alert: NoSignalsGenerated
+        expr: rate(trading_strategy_signals_total[30m]) == 0
+        for: 30m
+        labels:
+          severity: warning
+          team: trading
+        annotations:
+          summary: "No trading signals in the last 30 minutes"
+          description: "Check whether the market data feed and strategy engine are functioning correctly."
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Redis is DOWN — event bus unavailable"
+
+      - alert: HighEventBusBacklog
+        expr: trading_eventbus_published_total - trading_eventbus_consumed_total > 10000
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Event bus backlog exceeds 10,000 messages"
