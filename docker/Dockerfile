@@ -37,15 +37,12 @@ RUN groupadd -r trading && useradd -r -g trading -m -s /bin/bash trading
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY pyproject.toml .
-RUN pip install --upgrade pip && \
-    pip install poetry==1.7.1 && \
-    poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi --no-root
-
 # Copy application source
 COPY --chown=trading:trading . .
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --retries 15 --resume-retries 20 --timeout 60 ".[broker-binance]"
 
 USER trading
 
@@ -60,8 +57,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 CMD ["python", "-m", "uvicorn", "api.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8001", \
-     "--workers", "1", \
-     "--log-config", "shared/logging_setup.py"]
+     "--workers", "1"]
 
 # ── FastAPI Gateway ───────────────────────────────────────────────────────────
 FROM base AS api

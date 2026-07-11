@@ -82,7 +82,7 @@ services:
       TS_TUNE_NUM_CPUS: "4"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ../migrations/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "127.0.0.1:5432:5432"   # Localhost only — not exposed to internet
     networks:
@@ -134,7 +134,7 @@ services:
 
   trading-core:
     build:
-      context: .
+      context: ..
       dockerfile: docker/Dockerfile
       target: core
     container_name: trading-core
@@ -173,7 +173,7 @@ services:
 
   fastapi:
     build:
-      context: .
+      context: ..
       dockerfile: docker/Dockerfile
       target: api
     container_name: trading-api
@@ -208,8 +208,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/ssl:/etc/nginx/ssl:ro         # TLS certificates
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro         # TLS certificates
     depends_on:
       - fastapi
     networks:
@@ -226,7 +226,7 @@ services:
 
   streamlit:
     build:
-      context: .
+      context: ..
       dockerfile: docker/Dockerfile
       target: dashboard
     container_name: trading-dashboard
@@ -268,8 +268,8 @@ services:
       - "--web.enable-admin-api"
     volumes:
       - prometheus_data:/prometheus
-      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./docker/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
     ports:
       - "127.0.0.1:9090:9090"
     networks:
@@ -295,10 +295,10 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3002:3000"
     networks:
       - trading
     depends_on:
@@ -317,7 +317,7 @@ services:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
       - "--storage.path=/alertmanager"
     volumes:
-      - ./docker/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
       - "127.0.0.1:9093:9093"
     networks:
@@ -335,7 +335,7 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - loki_data:/loki
-      - ./docker/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
     ports:
       - "127.0.0.1:3100:3100"
     networks:
@@ -353,7 +353,7 @@ services:
     volumes:
       - /var/log:/var/log:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - ./docker/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - ./promtail-config.yaml:/etc/promtail/config.yml:ro
     command: -config.file=/etc/promtail/config.yml
     networks:
       - trading
@@ -422,11 +422,12 @@ services:
       MLFLOW_BACKEND_STORE_URI: postgresql://trading:${DB_PASSWORD:-strongpassword123}@postgres:5432/trading
       MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts
     command: >
+      sh -c "pip install --quiet psycopg2-binary &&
       mlflow server
       --backend-store-uri postgresql://trading:${DB_PASSWORD:-strongpassword123}@postgres:5432/trading
       --default-artifact-root /mlflow/artifacts
       --host 0.0.0.0
-      --port 5000
+      --port 5000"
     volumes:
       - /tmp/mlflow-artifacts:/mlflow/artifacts
     depends_on:
