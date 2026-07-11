@@ -39,16 +39,17 @@ from core.domain.events import BaseEvent
 
 logger = logging.getLogger(__name__)
 
-T           = TypeVar("T", bound=BaseEvent)
+T = TypeVar("T", bound=BaseEvent)
 HandlerType = Callable[[dict], Coroutine[Any, Any, None]]
 
-DLQ_STREAM         = "stream:dlq"
+DLQ_STREAM = "stream:dlq"
 MAX_RETRY_ATTEMPTS = 3
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Serialisation helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _serialise_event(event: BaseEvent) -> dict[str, str]:
     """Flatten a frozen dataclass event into a Redis hash (all string values)."""
@@ -74,6 +75,7 @@ def _serialise_event(event: BaseEvent) -> dict[str, str]:
 # Redis Event Bus
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class RedisEventBus:
     """
     Async Redis Streams-based event bus for the trading platform.
@@ -95,34 +97,34 @@ class RedisEventBus:
 
     def __init__(
         self,
-        pool:           ConnectionPool,
+        pool: ConnectionPool,
         consumer_group: str,
-        consumer_name:  str,
-        batch_size:     int = 100,
+        consumer_name: str,
+        batch_size: int = 100,
     ) -> None:
-        self._pool           = pool
-        self._client:        aioredis.Redis | None = None
+        self._pool = pool
+        self._client: aioredis.Redis | None = None
         self._consumer_group = consumer_group
-        self._consumer_name  = consumer_name
-        self._batch_size     = batch_size
-        self._handlers:      dict[str, list[HandlerType]] = {}
-        self._running        = False
+        self._consumer_name = consumer_name
+        self._batch_size = batch_size
+        self._handlers: dict[str, list[HandlerType]] = {}
+        self._running = False
         self._subscriber_tasks: list[asyncio.Task] = []
 
-        settings              = get_settings()
-        self._stream_max_len  = settings.redis.stream_max_len
+        settings = get_settings()
+        self._stream_max_len = settings.redis.stream_max_len
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         """Connect to Redis and initialise the client."""
-        self._client  = aioredis.Redis(connection_pool=self._pool)
+        self._client = aioredis.Redis(connection_pool=self._pool)
         self._running = True
         logger.info(
             "Redis event bus started",
             extra={
                 "consumer_group": self._consumer_group,
-                "consumer_name":  self._consumer_name,
+                "consumer_name": self._consumer_name,
             },
         )
 
@@ -149,17 +151,17 @@ class RedisEventBus:
 
         try:
             entry_id: str = await self._client.xadd(
-                name        = channel,
-                fields      = payload,
-                maxlen      = self._stream_max_len,
-                approximate = True,
+                name=channel,
+                fields=payload,
+                maxlen=self._stream_max_len,
+                approximate=True,
             )
             logger.debug(
                 "Event published",
                 extra={
-                    "channel":        channel,
-                    "event_id":       event.event_id,
-                    "entry_id":       entry_id,
+                    "channel": channel,
+                    "event_id": event.event_id,
+                    "entry_id": entry_id,
                     "correlation_id": event.correlation_id,
                 },
             )
@@ -203,13 +205,13 @@ class RedisEventBus:
             return
         try:
             await self._client.xgroup_create(
-                name      = channel,
-                groupname = self._consumer_group,
+                name=channel,
+                groupname=self._consumer_group,
                 # FIX BUG-07: id="$" — only NEW messages after this moment.
                 # id="0" was replaying ALL historical messages on every restart,
                 # causing spurious signals and broker orders.
-                id        = "$",
-                mkstream  = True,
+                id="$",
+                mkstream=True,
             )
             logger.info(
                 f"Consumer group '{self._consumer_group}' created on '{channel}' "
@@ -217,7 +219,7 @@ class RedisEventBus:
             )
         except aioredis.ResponseError as exc:
             if "BUSYGROUP" in str(exc):
-                pass   # group already exists — idempotent
+                pass  # group already exists — idempotent
             else:
                 raise
 
@@ -241,11 +243,11 @@ class RedisEventBus:
         while self._running:
             try:
                 messages = await self._client.xreadgroup(
-                    groupname    = self._consumer_group,
-                    consumername = self._consumer_name,
-                    streams      = {channel: ">"},
-                    count        = self._batch_size,
-                    block        = 0,
+                    groupname=self._consumer_group,
+                    consumername=self._consumer_name,
+                    streams={channel: ">"},
+                    count=self._batch_size,
+                    block=0,
                 )
 
                 if not messages:
@@ -267,9 +269,9 @@ class RedisEventBus:
 
     async def _dispatch(
         self,
-        channel:  str,
+        channel: str,
         entry_id: str | bytes,
-        data:     dict[bytes, bytes],
+        data: dict[bytes, bytes],
     ) -> None:
         """
         Decode a stream entry and invoke all registered handlers.
@@ -289,7 +291,7 @@ class RedisEventBus:
         }
 
         correlation_id = decoded.get("correlation_id", "unknown")
-        retry_count    = int(decoded.get("_retry_count", 0))
+        retry_count = int(decoded.get("_retry_count", 0))
 
         try:
             handlers = self._handlers.get(channel, [])
@@ -308,10 +310,10 @@ class RedisEventBus:
                     logger.error(
                         f"Handler {i} failed on channel '{channel}'",
                         extra={
-                            "channel":        channel,
-                            "entry_id":       str(entry_id),
+                            "channel": channel,
+                            "entry_id": str(entry_id),
                             "correlation_id": correlation_id,
-                            "error":          str(result),
+                            "error": str(result),
                         },
                         exc_info=result,
                     )
@@ -328,20 +330,20 @@ class RedisEventBus:
             logger.error(
                 "Fatal dispatch error — message left in PEL",
                 extra={
-                    "channel":        channel,
-                    "entry_id":       str(entry_id),
+                    "channel": channel,
+                    "entry_id": str(entry_id),
                     "correlation_id": correlation_id,
-                    "error":          str(exc),
+                    "error": str(exc),
                 },
                 exc_info=True,
             )
 
     async def _send_to_dlq(
         self,
-        source_channel:  str,
-        entry_id:        str | bytes,
-        decoded:         dict[str, str],
-        correlation_id:  str,
+        source_channel: str,
+        entry_id: str | bytes,
+        decoded: dict[str, str],
+        correlation_id: str,
     ) -> None:
         """
         FIX FAULT-02: Send a persistently failing message to the DLQ.
@@ -355,24 +357,24 @@ class RedisEventBus:
         dlq_payload = {
             **decoded,
             "_dlq_source_channel": source_channel,
-            "_dlq_entry_id":       str(entry_id),
-            "_dlq_timestamp":      datetime.now(timezone.utc).isoformat(),
+            "_dlq_entry_id": str(entry_id),
+            "_dlq_timestamp": datetime.now(timezone.utc).isoformat(),
             "_dlq_correlation_id": correlation_id,
         }
         try:
             await self._client.xadd(
-                name        = DLQ_STREAM,
-                fields      = dlq_payload,
-                maxlen      = 10_000,   # keep last 10k DLQ entries
-                approximate = True,
+                name=DLQ_STREAM,
+                fields=dlq_payload,
+                maxlen=10_000,  # keep last 10k DLQ entries
+                approximate=True,
             )
             logger.error(
                 "Message sent to Dead-Letter Queue",
                 extra={
-                    "source_channel":  source_channel,
-                    "entry_id":        str(entry_id),
-                    "correlation_id":  correlation_id,
-                    "dlq_stream":      DLQ_STREAM,
+                    "source_channel": source_channel,
+                    "entry_id": str(entry_id),
+                    "correlation_id": correlation_id,
+                    "dlq_stream": DLQ_STREAM,
                 },
             )
         except Exception as exc:
@@ -391,18 +393,19 @@ class RedisEventBus:
 # Factory
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def create_event_bus(consumer_group: str, consumer_name: str) -> RedisEventBus:
     """Factory: wires RedisEventBus with settings from environment."""
     settings = get_settings()
     pool = ConnectionPool.from_url(
         settings.redis.url,
-        max_connections          = settings.redis.max_connections,
-        socket_timeout           = settings.redis.socket_timeout,
-        decode_responses         = False,
-        health_check_interval    = 30,
+        max_connections=settings.redis.max_connections,
+        socket_timeout=settings.redis.socket_timeout,
+        decode_responses=False,
+        health_check_interval=30,
     )
     return RedisEventBus(
-        pool           = pool,
-        consumer_group = consumer_group,
-        consumer_name  = consumer_name,
+        pool=pool,
+        consumer_group=consumer_group,
+        consumer_name=consumer_name,
     )

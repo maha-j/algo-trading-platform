@@ -20,14 +20,14 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 
-from core.domain.events import FillEvent, TickEvent
 from config.settings import get_settings
+from core.domain.events import FillEvent, TickEvent
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +36,11 @@ logger = logging.getLogger(__name__)
 # Value objects
 # ---------------------------------------------------------------------------
 
+
 class AssetClass(str, Enum):
-    FOREX   = "FOREX"
-    CRYPTO  = "CRYPTO"
-    STOCKS  = "STOCKS"
+    FOREX = "FOREX"
+    CRYPTO = "CRYPTO"
+    STOCKS = "STOCKS"
     FUTURES = "FUTURES"
 
 
@@ -52,24 +53,23 @@ class Position:
     net_qty  < 0  → short
     net_qty == 0  → flat (deleted from active dict after close)
     """
-    symbol:          str
-    asset_class:     AssetClass
 
-    net_qty:         Decimal = Decimal("0")
+    symbol: str
+    asset_class: AssetClass
+
+    net_qty: Decimal = Decimal("0")
     avg_entry_price: Decimal = Decimal("0")
-    realised_pnl:    Decimal = Decimal("0")
-    unrealised_pnl:  Decimal = Decimal("0")
+    realised_pnl: Decimal = Decimal("0")
+    unrealised_pnl: Decimal = Decimal("0")
     commission_paid: Decimal = Decimal("0")
 
-    opened_at:       datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    last_updated:    datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    current_price:   Decimal  = Decimal("0")
+    opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    current_price: Decimal = Decimal("0")
 
     @property
     def market_value(self) -> Decimal:
-        return (self.net_qty * self.current_price).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
+        return (self.net_qty * self.current_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     @property
     def total_pnl(self) -> Decimal:
@@ -89,8 +89,8 @@ class Position:
         if self.net_qty == 0 or self.avg_entry_price == 0:
             self.unrealised_pnl = Decimal("0")
             return
-        price_diff           = current_price - self.avg_entry_price
-        self.unrealised_pnl  = (price_diff * self.net_qty).quantize(
+        price_diff = current_price - self.avg_entry_price
+        self.unrealised_pnl = (price_diff * self.net_qty).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
         self.last_updated = datetime.now(timezone.utc)
@@ -102,7 +102,7 @@ class Position:
         Returns the realised P&L for this specific fill so the caller
         can accumulate it in _cumulative_realised_pnl.
         """
-        fill_qty   = Decimal(str(fill.quantity))
+        fill_qty = Decimal(str(fill.quantity))
         fill_price = Decimal(str(fill.fill_price))
         commission = Decimal(str(fill.commission))
 
@@ -113,30 +113,24 @@ class Position:
         if self.net_qty == 0:
             # Opening a new position
             self.avg_entry_price = fill_price
-            self.net_qty         = fill_qty if fill.side == "BUY" else -fill_qty
+            self.net_qty = fill_qty if fill.side == "BUY" else -fill_qty
         else:
             fill_signed = fill_qty if fill.side == "BUY" else -fill_qty
-            new_qty     = self.net_qty + fill_signed
+            new_qty = self.net_qty + fill_signed
 
             if self.net_qty > 0 and fill_signed < 0:
                 # Partial or full close of long
-                closed          = min(abs(fill_signed), self.net_qty)
-                this_realised   = (fill_price - self.avg_entry_price) * closed
-                self.realised_pnl += this_realised.quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
+                closed = min(abs(fill_signed), self.net_qty)
+                this_realised = (fill_price - self.avg_entry_price) * closed
+                self.realised_pnl += this_realised.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             elif self.net_qty < 0 and fill_signed > 0:
                 # Partial or full close of short
-                closed          = min(fill_signed, abs(self.net_qty))
-                this_realised   = (self.avg_entry_price - fill_price) * closed
-                self.realised_pnl += this_realised.quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
-            elif (self.net_qty > 0 and fill_signed > 0) or (
-                self.net_qty < 0 and fill_signed < 0
-            ):
+                closed = min(fill_signed, abs(self.net_qty))
+                this_realised = (self.avg_entry_price - fill_price) * closed
+                self.realised_pnl += this_realised.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            elif (self.net_qty > 0 and fill_signed > 0) or (self.net_qty < 0 and fill_signed < 0):
                 # Adding to existing position — recalculate VWAP entry
-                total_cost           = self.avg_entry_price * abs(self.net_qty) + fill_price * fill_qty
+                total_cost = self.avg_entry_price * abs(self.net_qty) + fill_price * fill_qty
                 self.avg_entry_price = total_cost / (abs(self.net_qty) + fill_qty)
 
             self.net_qty = new_qty
@@ -144,7 +138,10 @@ class Position:
         self.last_updated = datetime.now(timezone.utc)
         logger.debug(
             "Position updated | %s | qty=%s avg=%.5f realised=%.2f",
-            self.symbol, self.net_qty, float(self.avg_entry_price), float(self.realised_pnl),
+            self.symbol,
+            self.net_qty,
+            float(self.avg_entry_price),
+            float(self.realised_pnl),
         )
         # Return GROSS realised P&L — commission is handled separately in on_fill() cash flows
         return this_realised
@@ -153,6 +150,7 @@ class Position:
 # ---------------------------------------------------------------------------
 # Position sizing models
 # ---------------------------------------------------------------------------
+
 
 class PositionSizer:
     """
@@ -166,18 +164,18 @@ class PositionSizer:
 
     def __init__(
         self,
-        target_vol_pct:   float = 0.01,
+        target_vol_pct: float = 0.01,
         max_position_pct: float = 0.05,
-        kelly_fraction:   float = 0.5,
+        kelly_fraction: float = 0.5,
     ) -> None:
-        self.target_vol_pct   = target_vol_pct
+        self.target_vol_pct = target_vol_pct
         self.max_position_pct = max_position_pct
-        self.kelly_fraction   = kelly_fraction
+        self.kelly_fraction = kelly_fraction
 
     def vol_target_size(
         self,
-        equity:   Decimal,
-        price:    Decimal,
+        equity: Decimal,
+        price: Decimal,
         daily_vol: float,
         lot_size: Decimal = Decimal("1"),
     ) -> Decimal:
@@ -185,47 +183,47 @@ class PositionSizer:
         if daily_vol <= 0 or price <= 0 or equity <= 0:
             return Decimal("0")
 
-        price_vol   = float(price) * daily_vol
+        price_vol = float(price) * daily_vol
         target_risk = float(equity) * self.target_vol_pct
-        raw_units   = target_risk / price_vol if price_vol > 0 else 0
-        max_units   = float(equity) * self.max_position_pct / float(price)
+        raw_units = target_risk / price_vol if price_vol > 0 else 0
+        max_units = float(equity) * self.max_position_pct / float(price)
 
         units = min(raw_units, max_units)
-        lots  = Decimal(str(units)) / lot_size
-        lots  = lots.to_integral_value(rounding=ROUND_HALF_UP)
+        lots = Decimal(str(units)) / lot_size
+        lots = lots.to_integral_value(rounding=ROUND_HALF_UP)
         return max(Decimal("0"), lots * lot_size)
 
     def kelly_size(
         self,
-        equity:   Decimal,
-        price:    Decimal,
+        equity: Decimal,
+        price: Decimal,
         win_rate: float,
-        avg_win:  float,
+        avg_win: float,
         avg_loss: float,
         lot_size: Decimal = Decimal("1"),
     ) -> Decimal:
         """Half-Kelly position size. Returns 0 if edge is negative."""
         if avg_loss <= 0:
             return Decimal("0")
-        R     = avg_win / avg_loss
+        R = avg_win / avg_loss
         kelly = win_rate - (1 - win_rate) / R
         if kelly <= 0:
             return Decimal("0")
         half_kelly = kelly * self.kelly_fraction
-        raw_units  = float(equity) * half_kelly / float(price)
-        max_units  = float(equity) * self.max_position_pct / float(price)
-        units      = min(raw_units, max_units)
-        lots       = Decimal(str(units)) / lot_size
-        lots       = lots.to_integral_value(rounding=ROUND_HALF_UP)
+        raw_units = float(equity) * half_kelly / float(price)
+        max_units = float(equity) * self.max_position_pct / float(price)
+        units = min(raw_units, max_units)
+        lots = Decimal(str(units)) / lot_size
+        lots = lots.to_integral_value(rounding=ROUND_HALF_UP)
         return max(Decimal("0"), lots * lot_size)
 
     def recommended_size(
         self,
-        equity:   Decimal,
-        price:    Decimal,
+        equity: Decimal,
+        price: Decimal,
         daily_vol: float,
         win_rate: float = 0.55,
-        avg_win:  float = 1.5,
+        avg_win: float = 1.5,
         avg_loss: float = 1.0,
         lot_size: Decimal = Decimal("1"),
     ) -> Decimal:
@@ -241,6 +239,7 @@ class PositionSizer:
 # Portfolio Engine
 # ---------------------------------------------------------------------------
 
+
 class PortfolioEngine:
     """
     Tracks live positions, equity, and P&L.
@@ -251,7 +250,7 @@ class PortfolioEngine:
       Where:
         _cash is seeded with initial_capital and adjusted on every fill.
         Closed P&L accumulates in _cumulative_realised_pnl (never lost).
-      
+
       get_equity() = _cash + sum(unrealised of open positions)
 
     Thread safety:
@@ -263,24 +262,24 @@ class PortfolioEngine:
     def __init__(
         self,
         initial_capital: float = 100_000.0,
-        base_currency:   str   = "USD",
+        base_currency: str = "USD",
         event_bus=None,
     ) -> None:
         settings = get_settings()
 
-        self._positions:                  Dict[str, Position] = {}
-        self._equity_curve:               List[tuple]         = []
-        self._initial_capital:            Decimal             = Decimal(str(initial_capital))
-        self._cash:                       Decimal             = Decimal(str(initial_capital))
-        self._cumulative_realised_pnl:    Decimal             = Decimal("0")
-        self._cumulative_commission:      Decimal             = Decimal("0")
-        self._base_currency:              str                 = base_currency
-        self._event_bus                                       = event_bus
-        self._lock                                            = asyncio.Lock()
+        self._positions: Dict[str, Position] = {}
+        self._equity_curve: List[tuple] = []
+        self._initial_capital: Decimal = Decimal(str(initial_capital))
+        self._cash: Decimal = Decimal(str(initial_capital))
+        self._cumulative_realised_pnl: Decimal = Decimal("0")
+        self._cumulative_commission: Decimal = Decimal("0")
+        self._base_currency: str = base_currency
+        self._event_bus = event_bus
+        self._lock = asyncio.Lock()
 
         self._sizer = PositionSizer(
-            target_vol_pct   = settings.risk.max_position_size_pct / 2,
-            max_position_pct = settings.risk.max_position_size_pct,
+            target_vol_pct=settings.risk.max_position_size_pct / 2,
+            max_position_pct=settings.risk.max_position_size_pct,
         )
         self._peak_equity = self._initial_capital
 
@@ -289,7 +288,8 @@ class PortfolioEngine:
 
         logger.info(
             "PortfolioEngine initialised | capital=%.2f %s",
-            initial_capital, base_currency,
+            initial_capital,
+            base_currency,
         )
 
     # ------------------------------------------------------------------
@@ -302,8 +302,8 @@ class PortfolioEngine:
             symbol = fill.symbol
             if symbol not in self._positions:
                 self._positions[symbol] = Position(
-                    symbol      = symbol,
-                    asset_class = self._classify_asset(symbol),
+                    symbol=symbol,
+                    asset_class=self._classify_asset(symbol),
                 )
 
             pos = self._positions[symbol]
@@ -315,7 +315,7 @@ class PortfolioEngine:
             self._cumulative_realised_pnl += net_realised.quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
-            self._cumulative_commission   += Decimal(str(fill.commission))
+            self._cumulative_commission += Decimal(str(fill.commission))
 
             # Adjust cash — buys decrease cash, sells increase cash
             fill_value = Decimal(str(fill.fill_price)) * Decimal(str(fill.quantity))
@@ -336,8 +336,11 @@ class PortfolioEngine:
             self._record_equity_snapshot()
             logger.info(
                 "Fill processed | %s %s %.4f @ %.5f | equity=%.2f",
-                fill.side, fill.symbol, float(fill.quantity),
-                float(fill.fill_price), float(self.get_equity()),
+                fill.side,
+                fill.symbol,
+                float(fill.quantity),
+                float(fill.fill_price),
+                float(self.get_equity()),
             )
 
     async def on_tick(self, tick: TickEvent) -> None:
@@ -365,12 +368,8 @@ class PortfolioEngine:
         It already embeds all realised P&L implicitly through fill accounting.
         Unrealised P&L from open positions is added on top.
         """
-        unrealised_total = sum(
-            p.unrealised_pnl for p in self._positions.values()
-        )
-        return (self._cash + unrealised_total).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
+        unrealised_total = sum(p.unrealised_pnl for p in self._positions.values())
+        return (self._cash + unrealised_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def get_realised_pnl(self) -> Decimal:
         """Cumulative net realised P&L (all closed trades, all time)."""
@@ -381,9 +380,7 @@ class PortfolioEngine:
         FIX BUG-04 — Net P&L for today only (UTC calendar day).
         Used by DailyLossValidator to correctly implement daily loss limits.
         """
-        today_start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         daily = Decimal("0")
         for ts, pnl in self._daily_fills:
             if ts >= today_start:
@@ -416,24 +413,24 @@ class PortfolioEngine:
 
     def calculate_position_size(
         self,
-        symbol:   str,
-        price:    float,
+        symbol: str,
+        price: float,
         daily_vol: float,
         lot_size: float = 1.0,
     ) -> Decimal:
         """Recommended position size (units) for a new trade."""
         return self._sizer.recommended_size(
-            equity    = self.get_equity(),
-            price     = Decimal(str(price)),
-            daily_vol = daily_vol,
-            lot_size  = Decimal(str(lot_size)),
+            equity=self.get_equity(),
+            price=Decimal(str(price)),
+            daily_vol=daily_vol,
+            lot_size=Decimal(str(lot_size)),
         )
 
     def get_returns_series(self) -> "np.ndarray":
         """Percentage returns from the equity curve for VaR/CVaR."""
         if len(self._equity_curve) < 2:
             return np.array([])
-        values  = np.array([float(v) for _, v in self._equity_curve])
+        values = np.array([float(v) for _, v in self._equity_curve])
         returns = np.diff(values) / values[:-1]
         return returns
 
@@ -441,28 +438,28 @@ class PortfolioEngine:
         """Serialisable summary for API endpoints and dashboard."""
         positions = [
             {
-                "symbol":          p.symbol,
-                "asset_class":     p.asset_class.value,
-                "net_qty":         float(p.net_qty),
-                "avg_entry":       float(p.avg_entry_price),
-                "current_price":   float(p.current_price),
-                "unrealised_pnl":  float(p.unrealised_pnl),
-                "realised_pnl":    float(p.realised_pnl),
-                "market_value":    float(p.market_value),
+                "symbol": p.symbol,
+                "asset_class": p.asset_class.value,
+                "net_qty": float(p.net_qty),
+                "avg_entry": float(p.avg_entry_price),
+                "current_price": float(p.current_price),
+                "unrealised_pnl": float(p.unrealised_pnl),
+                "realised_pnl": float(p.realised_pnl),
+                "market_value": float(p.market_value),
             }
             for p in self._positions.values()
         ]
         return {
-            "equity":           float(self.get_equity()),
-            "initial_capital":  float(self._initial_capital),
-            "cash":             float(self._cash),
-            "realised_pnl":     float(self.get_realised_pnl()),
-            "unrealised_pnl":   float(self.get_unrealised_pnl()),
-            "total_pnl":        float(self.get_realised_pnl() + self.get_unrealised_pnl()),
-            "drawdown_pct":     round(self.get_current_drawdown() * 100, 2),
-            "exposure_pct":     round(self.get_exposure_pct(), 2),
-            "open_positions":   len(self._positions),
-            "positions":        positions,
+            "equity": float(self.get_equity()),
+            "initial_capital": float(self._initial_capital),
+            "cash": float(self._cash),
+            "realised_pnl": float(self.get_realised_pnl()),
+            "unrealised_pnl": float(self.get_unrealised_pnl()),
+            "total_pnl": float(self.get_realised_pnl() + self.get_unrealised_pnl()),
+            "drawdown_pct": round(self.get_current_drawdown() * 100, 2),
+            "exposure_pct": round(self.get_exposure_pct(), 2),
+            "open_positions": len(self._positions),
+            "positions": positions,
         }
 
     # ------------------------------------------------------------------
@@ -471,7 +468,7 @@ class PortfolioEngine:
 
     def _record_equity_snapshot(self) -> None:
         equity = self.get_equity()
-        ts     = datetime.now(timezone.utc)
+        ts = datetime.now(timezone.utc)
         self._equity_curve.append((ts, equity))
         if len(self._equity_curve) > 100_000:
             self._equity_curve = self._equity_curve[-100_000:]

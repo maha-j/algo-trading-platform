@@ -32,10 +32,8 @@ from __future__ import annotations
 import logging
 import pickle
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -45,9 +43,10 @@ logger = logging.getLogger(__name__)
 # Optional ML dependencies — graceful degradation if not installed
 try:
     from sklearn.ensemble import IsolationForest, RandomForestClassifier
-    from sklearn.preprocessing import StandardScaler
+    from sklearn.model_selection import TimeSeriesSplit, cross_val_score  # noqa: F401
     from sklearn.pipeline import Pipeline
-    from sklearn.model_selection import TimeSeriesSplit, cross_val_score
+    from sklearn.preprocessing import StandardScaler
+
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
@@ -55,6 +54,7 @@ except ImportError:
 
 try:
     import lightgbm as lgb
+
     LGBM_AVAILABLE = True
 except ImportError:
     LGBM_AVAILABLE = False
@@ -62,6 +62,7 @@ except ImportError:
 try:
     import mlflow
     import mlflow.sklearn
+
     MLFLOW_AVAILABLE = True
 except ImportError:
     MLFLOW_AVAILABLE = False
@@ -70,6 +71,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Feature engineering (stateless, functional)
 # ---------------------------------------------------------------------------
+
 
 class FeatureEngine:
     """
@@ -100,9 +102,9 @@ class FeatureEngine:
         if df is None or len(df) < 60:
             return pd.DataFrame()
 
-        close  = df["close"]
-        high   = df["high"]
-        low    = df["low"]
+        close = df["close"]
+        high = df["high"]
+        low = df["low"]
         volume = df.get("volume", pd.Series(0, index=df.index))
 
         feats: Dict[str, pd.Series] = {}
@@ -117,12 +119,14 @@ class FeatureEngine:
             feats[f"vol_{lb}"] = ret.rolling(lb).std() * np.sqrt(252)
 
         # Parkinson volatility (high/low estimator — better than close-to-close)
-        feats["parkinson_vol"] = (
-            np.sqrt(1 / (4 * np.log(2)) * (np.log(high / low) ** 2).rolling(20).mean())
+        feats["parkinson_vol"] = np.sqrt(
+            1 / (4 * np.log(2)) * (np.log(high / low) ** 2).rolling(20).mean()
         )
 
         # ATR ratio
-        tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
+        tr = pd.concat(
+            [high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1
+        ).max(axis=1)
         feats["atr_ratio"] = tr.rolling(14).mean() / close
 
         # --- Trend features ---
@@ -136,28 +140,29 @@ class FeatureEngine:
             def slope(y: np.ndarray) -> float:
                 x = np.arange(len(y))
                 return np.polyfit(x, y, 1)[0] / (y.mean() + 1e-10)
+
             return series.rolling(window).apply(slope, raw=True)
 
         feats["slope_20"] = rolling_slope(close, 20)
 
         # Bollinger band position
-        sma20  = close.rolling(20).mean()
-        std20  = close.rolling(20).std()
+        sma20 = close.rolling(20).mean()
+        std20 = close.rolling(20).std()
         feats["bb_position"] = (close - sma20) / (2 * std20 + 1e-10)
-        feats["bb_width"]    = 4 * std20 / (sma20 + 1e-10)
+        feats["bb_width"] = 4 * std20 / (sma20 + 1e-10)
 
         # RSI (normalised to -1..1)
         delta = close.diff()
-        gain  = delta.clip(lower=0).rolling(14).mean()
-        loss  = (-delta.clip(upper=0)).rolling(14).mean()
-        rs    = gain / (loss + 1e-10)
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        rs = gain / (loss + 1e-10)
         feats["rsi_norm"] = (100 - 100 / (1 + rs)) / 50 - 1
 
         # --- Volume features ---
         vol_mean = volume.rolling(20).mean()
-        vol_std  = volume.rolling(20).std()
+        vol_std = volume.rolling(20).std()
         feats["vol_zscore"] = (volume - vol_mean) / (vol_std + 1e-10)
-        feats["vol_trend"]  = np.log(volume.rolling(5).mean() / (volume.rolling(20).mean() + 1e-10))
+        feats["vol_trend"] = np.log(volume.rolling(5).mean() / (volume.rolling(20).mean() + 1e-10))
 
         # OBV momentum
         obv = (np.sign(close.diff()) * volume).cumsum()
@@ -166,8 +171,8 @@ class FeatureEngine:
         # --- Microstructure features ---
         bar_range = high - low
         feats["upper_shadow"] = (high - close.clip(upper=high, lower=close)) / (bar_range + 1e-10)
-        feats["lower_shadow"] = (close.clip(upper=close, lower=low) - low)  / (bar_range + 1e-10)
-        feats["body_ratio"]   = np.abs(close - df["open"]) / (bar_range + 1e-10)
+        feats["lower_shadow"] = (close.clip(upper=close, lower=low) - low) / (bar_range + 1e-10)
+        feats["body_ratio"] = np.abs(close - df["open"]) / (bar_range + 1e-10)
 
         # Build DataFrame
         feature_df = pd.DataFrame(feats, index=df.index)
@@ -195,6 +200,7 @@ class FeatureEngine:
 # ---------------------------------------------------------------------------
 # Regime Classifier (Hidden Markov Model approximation via GMM)
 # ---------------------------------------------------------------------------
+
 
 class RegimeClassifier:
     """
@@ -232,12 +238,14 @@ class RegimeClassifier:
         from sklearn.preprocessing import StandardScaler
 
         returns = np.log(df["close"] / df["close"].shift(1)).dropna()
-        vol20   = returns.rolling(20).std().dropna()
+        vol20 = returns.rolling(20).std().dropna()
         min_len = min(len(returns), len(vol20))
-        features = np.column_stack([
-            returns.iloc[-min_len:].values,
-            vol20.iloc[-min_len:].values,
-        ])
+        features = np.column_stack(
+            [
+                returns.iloc[-min_len:].values,
+                vol20.iloc[-min_len:].values,
+            ]
+        )
 
         self._scaler = StandardScaler()
         features_scaled = self._scaler.fit_transform(features)
@@ -265,7 +273,7 @@ class RegimeClassifier:
                 return self._last_regime
 
             mean_ret = ret.mean()
-            vol      = ret.std()
+            vol = ret.std()
 
             features = np.array([[mean_ret, vol]])
             features_scaled = self._scaler.transform(features)
@@ -284,6 +292,7 @@ class RegimeClassifier:
 # ---------------------------------------------------------------------------
 # Return Predictor (LightGBM / RandomForest)
 # ---------------------------------------------------------------------------
+
 
 class ReturnPredictor:
     """
@@ -319,7 +328,7 @@ class ReturnPredictor:
 
         # Align and drop NaN
         valid = X.notna().all(axis=1) & y.notna()
-        X, y  = X[valid], y[valid]
+        X, y = X[valid], y[valid]
 
         if len(X) < 200:
             logger.warning("ReturnPredictor: insufficient training data (%d rows)", len(X))
@@ -350,21 +359,26 @@ class ReturnPredictor:
                 random_state=42,
             )
 
-        self._pipeline = Pipeline([
-            ("scaler", StandardScaler()),
-            ("model", estimator),
-        ])
+        self._pipeline = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("model", estimator),
+            ]
+        )
 
         self._pipeline.fit(X_train, y_train)
 
         # Evaluate
-        from sklearn.metrics import roc_auc_score, accuracy_score
+        from sklearn.metrics import accuracy_score, roc_auc_score
+
         y_pred_proba = self._pipeline.predict_proba(X_test)[:, 1]
-        y_pred       = (y_pred_proba >= self.confidence_threshold).astype(int)
+        y_pred = (y_pred_proba >= self.confidence_threshold).astype(int)
 
         auc = roc_auc_score(y_test, y_pred_proba)
         acc = accuracy_score(y_test, y_pred)
-        logger.info("ReturnPredictor | AUC=%.3f Accuracy=%.3f (test=%d rows)", auc, acc, len(X_test))
+        logger.info(
+            "ReturnPredictor | AUC=%.3f Accuracy=%.3f (test=%d rows)", auc, acc, len(X_test)
+        )
 
         # Feature importance
         model = self._pipeline.named_steps["model"]
@@ -385,7 +399,7 @@ class ReturnPredictor:
         if not self._is_fitted or self._pipeline is None:
             return 0.5  # No edge — neutral
 
-        X = FeatureEngine.build_features(df.iloc[-max(last_n, 100):])
+        X = FeatureEngine.build_features(df.iloc[-max(last_n, 100) :])
         if X.empty:
             return 0.5
 
@@ -423,6 +437,7 @@ class ReturnPredictor:
 # ---------------------------------------------------------------------------
 # Anomaly Detector
 # ---------------------------------------------------------------------------
+
 
 class AnomalyDetector:
     """
@@ -490,6 +505,7 @@ class AnomalyDetector:
 # ML Engine orchestrator
 # ---------------------------------------------------------------------------
 
+
 class MLEngine:
     """
     Orchestrates all ML models for a given symbol.
@@ -502,8 +518,8 @@ class MLEngine:
 
     def __init__(self) -> None:
         self._classifiers: Dict[str, RegimeClassifier] = {}
-        self._predictors:  Dict[str, ReturnPredictor]  = {}
-        self._detectors:   Dict[str, AnomalyDetector]  = {}
+        self._predictors: Dict[str, ReturnPredictor] = {}
+        self._detectors: Dict[str, AnomalyDetector] = {}
         self._trained: set = set()
 
     def train(self, symbol: str, df: pd.DataFrame) -> None:
@@ -515,9 +531,7 @@ class MLEngine:
         clf.fit(df)
         self._classifiers[symbol] = clf
 
-        pred = ReturnPredictor(
-            model_path=Path(f"/tmp/{symbol.lower()}_predictor.pkl")
-        )
+        pred = ReturnPredictor(model_path=Path(f"/tmp/{symbol.lower()}_predictor.pkl"))
         pred.fit(df)
         self._predictors[symbol] = pred
 
@@ -536,15 +550,20 @@ class MLEngine:
         try:
             mlflow.set_experiment(f"trading_{symbol.lower()}")
             with mlflow.start_run():
-                mlflow.log_params({
-                    "symbol": symbol,
-                    "training_rows": len(df),
-                    "forward_bars": pred.forward_bars,
-                    "model_type": "LightGBM" if LGBM_AVAILABLE else "RandomForest",
-                })
+                mlflow.log_params(
+                    {
+                        "symbol": symbol,
+                        "training_rows": len(df),
+                        "forward_bars": pred.forward_bars,
+                        "model_type": "LightGBM" if LGBM_AVAILABLE else "RandomForest",
+                    }
+                )
                 if pred._feature_importance:
-                    top5 = dict(sorted(pred._feature_importance.items(),
-                                       key=lambda x: x[1], reverse=True)[:5])
+                    top5 = dict(
+                        sorted(pred._feature_importance.items(), key=lambda x: x[1], reverse=True)[
+                            :5
+                        ]
+                    )
                     mlflow.log_metrics({f"fi_{k}": v for k, v in top5.items()})
                 if pred._pipeline:
                     mlflow.sklearn.log_model(pred._pipeline, "return_predictor")

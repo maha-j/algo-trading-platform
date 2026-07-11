@@ -24,17 +24,17 @@ from typing import Any, Optional
 class EventType(str, Enum):
     """Canonical event type identifiers for Redis Stream routing."""
 
-    TICK             = "TICK"
-    BAR              = "BAR"
-    INDICATOR        = "INDICATOR"
-    SIGNAL           = "SIGNAL"
-    ORDER_NEW        = "ORDER_NEW"
-    ORDER_FILLED     = "ORDER_FILLED"
-    ORDER_CANCELLED  = "ORDER_CANCELLED"
-    ORDER_REJECTED   = "ORDER_REJECTED"
+    TICK = "TICK"
+    BAR = "BAR"
+    INDICATOR = "INDICATOR"
+    SIGNAL = "SIGNAL"
+    ORDER_NEW = "ORDER_NEW"
+    ORDER_FILLED = "ORDER_FILLED"
+    ORDER_CANCELLED = "ORDER_CANCELLED"
+    ORDER_REJECTED = "ORDER_REJECTED"
     PORTFOLIO_UPDATE = "PORTFOLIO_UPDATE"
-    RISK_BREACH      = "RISK_BREACH"
-    SYSTEM_ALERT     = "SYSTEM_ALERT"
+    RISK_BREACH = "RISK_BREACH"
+    SYSTEM_ALERT = "SYSTEM_ALERT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,12 +50,12 @@ class BaseEvent:
         correlation_id: Trace ID propagated across service boundaries.
     """
 
-    event_type:     EventType
-    source:         str
+    event_type: EventType
+    source: str
     # FIX BUG-05: datetime.now(timezone.utc) — timezone-aware, not deprecated
-    timestamp:      datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    event_id:       str      = field(default_factory=lambda: str(uuid.uuid4()))
-    correlation_id: str      = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    correlation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     @classmethod
     def channel(cls) -> str:
@@ -77,11 +77,11 @@ class TickEvent(BaseEvent):
     """
 
     event_type: EventType = field(default=EventType.TICK, init=False)
-    symbol:     str       = ""
-    bid:        Decimal   = Decimal("0")
-    ask:        Decimal   = Decimal("0")
-    volume:     Decimal   = Decimal("0")
-    provider:   str       = ""
+    symbol: str = ""
+    bid: Decimal = Decimal("0")
+    ask: Decimal = Decimal("0")
+    volume: Decimal = Decimal("0")
+    provider: str = ""
 
     @property
     def mid(self) -> Decimal:
@@ -121,15 +121,15 @@ class BarEvent(BaseEvent):
     """
 
     event_type: EventType = field(default=EventType.BAR, init=False)
-    symbol:     str       = ""
-    timeframe:  str       = ""
-    open:       Decimal   = Decimal("0")
-    high:       Decimal   = Decimal("0")
-    low:        Decimal   = Decimal("0")
-    close:      Decimal   = Decimal("0")
-    volume:     Decimal   = Decimal("0")
-    bar_index:  int       = 0
-    is_closed:  bool      = True
+    symbol: str = ""
+    timeframe: str = ""
+    open: Decimal = Decimal("0")
+    high: Decimal = Decimal("0")
+    low: Decimal = Decimal("0")
+    close: Decimal = Decimal("0")
+    volume: Decimal = Decimal("0")
+    bar_index: int = 0
+    is_closed: bool = True
 
     @property
     def body(self) -> Decimal:
@@ -161,14 +161,14 @@ class SignalEvent(BaseEvent):
         metadata:     Arbitrary dict for strategy-specific context.
     """
 
-    event_type:   EventType        = field(default=EventType.SIGNAL, init=False)
-    symbol:       str              = ""
-    strategy_id:  str              = ""
-    direction:    str              = ""
-    strength:     float            = 0.0
-    signal_price: Decimal          = Decimal("0")
-    timeframe:    str              = ""
-    metadata:     dict[str, Any]   = field(default_factory=dict)
+    event_type: EventType = field(default=EventType.SIGNAL, init=False)
+    symbol: str = ""
+    strategy_id: str = ""
+    direction: str = ""
+    strength: float = 0.0
+    signal_price: Decimal = Decimal("0")
+    timeframe: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def channel(cls) -> str:
@@ -193,17 +193,17 @@ class OrderEvent(BaseEvent):
         risk_approved: True if Risk Engine has validated.
     """
 
-    event_type:    EventType        = field(default=EventType.ORDER_NEW, init=False)
-    order_id:      str              = field(default_factory=lambda: str(uuid.uuid4()))
-    symbol:        str              = ""
-    order_type:    str              = "MARKET"
-    side:          str              = ""
-    quantity:      Decimal          = Decimal("0")
-    limit_price:   Optional[Decimal] = None
-    stop_price:    Optional[Decimal] = None
-    strategy_id:   str              = ""
-    algorithm:     str              = "MARKET"
-    risk_approved: bool             = False
+    event_type: EventType = field(default=EventType.ORDER_NEW, init=False)
+    order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    symbol: str = ""
+    order_type: str = "MARKET"
+    side: str = ""
+    quantity: Decimal = Decimal("0")
+    limit_price: Optional[Decimal] = None
+    stop_price: Optional[Decimal] = None
+    strategy_id: str = ""
+    algorithm: str = "MARKET"
+    risk_approved: bool = False
 
     @classmethod
     def channel(cls) -> str:
@@ -229,13 +229,13 @@ class FillEvent(BaseEvent):
     """
 
     event_type: EventType = field(default=EventType.ORDER_FILLED, init=False)
-    order_id:   str       = ""
-    symbol:     str       = ""
-    side:       str       = ""
-    quantity:   Decimal   = Decimal("0")
-    fill_price: Decimal   = Decimal("0")
-    commission: Decimal   = Decimal("0")
-    slippage:   Decimal   = Decimal("0")
+    order_id: str = ""
+    symbol: str = ""
+    side: str = ""
+    quantity: Decimal = Decimal("0")
+    fill_price: Decimal = Decimal("0")
+    commission: Decimal = Decimal("0")
+    slippage: Decimal = Decimal("0")
 
     @classmethod
     def channel(cls) -> str:
@@ -254,11 +254,11 @@ class RiskBreachEvent(BaseEvent):
         action:        Automated action taken ('BLOCK_NEW', 'FLATTEN', 'ALERT_ONLY').
     """
 
-    event_type:    EventType = field(default=EventType.RISK_BREACH, init=False)
-    breach_type:   str       = ""
-    current_value: float     = 0.0
-    limit_value:   float     = 0.0
-    action:        str       = "ALERT_ONLY"
+    event_type: EventType = field(default=EventType.RISK_BREACH, init=False)
+    breach_type: str = ""
+    current_value: float = 0.0
+    limit_value: float = 0.0
+    action: str = "ALERT_ONLY"
 
     @classmethod
     def channel(cls) -> str:

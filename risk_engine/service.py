@@ -34,7 +34,6 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Callable, Optional
 
 import numpy as np
@@ -51,6 +50,7 @@ logger = logging.getLogger(__name__)
 # Risk Validation Result
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class ValidationResult:
     """
@@ -63,16 +63,18 @@ class ValidationResult:
         metric_value:   Current value of the checked metric.
         limit_value:    Configured limit for reference.
     """
-    approved:       bool
+
+    approved: bool
     validator_name: str
-    message:        str
-    metric_value:   float = 0.0
-    limit_value:    float = 0.0
+    message: str
+    metric_value: float = 0.0
+    limit_value: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Abstract Validator (Chain of Responsibility)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class RiskValidator(ABC):
     """Abstract base for all risk validators in the chain."""
@@ -87,8 +89,8 @@ class RiskValidator(ABC):
     @abstractmethod
     async def validate(
         self,
-        signal:          SignalEvent,
-        portfolio:       IPortfolioEngine,
+        signal: SignalEvent,
+        portfolio: IPortfolioEngine,
         returns_history: pd.Series,
     ) -> ValidationResult:
         """
@@ -109,6 +111,7 @@ class RiskValidator(ABC):
 # Concrete Validators
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class PositionLimitValidator(RiskValidator):
     """
     Reject signals that would exceed the max position size per symbol.
@@ -117,35 +120,33 @@ class PositionLimitValidator(RiskValidator):
 
     async def validate(
         self,
-        signal:          SignalEvent,
-        portfolio:       IPortfolioEngine,
+        signal: SignalEvent,
+        portfolio: IPortfolioEngine,
         returns_history: pd.Series,
     ) -> ValidationResult:
         # CONTRACT-01 fix: get_equity() is sync in implementation
         equity = float(portfolio.get_equity())
         if equity <= 0:
             return ValidationResult(
-                approved       = False,
-                validator_name = self.name,
-                message        = "Zero equity — cannot size position",
-                limit_value    = self._settings.max_position_size_pct,
+                approved=False,
+                validator_name=self.name,
+                message="Zero equity — cannot size position",
+                limit_value=self._settings.max_position_size_pct,
             )
 
-        positions       = portfolio.get_positions()
-        current_pos     = positions.get(signal.symbol)
-        current_mv      = abs(float(current_pos.market_value)) if current_pos else 0.0
-        current_pct     = current_mv / equity
-        limit           = self._settings.max_position_size_pct
-        approved        = current_pct < limit
+        positions = portfolio.get_positions()
+        current_pos = positions.get(signal.symbol)
+        current_mv = abs(float(current_pos.market_value)) if current_pos else 0.0
+        current_pct = current_mv / equity
+        limit = self._settings.max_position_size_pct
+        approved = current_pct < limit
 
         return ValidationResult(
-            approved       = approved,
-            validator_name = self.name,
-            message        = (
-                f"Position {signal.symbol}: {current_pct:.2%} vs limit {limit:.2%}"
-            ),
-            metric_value   = current_pct,
-            limit_value    = limit,
+            approved=approved,
+            validator_name=self.name,
+            message=(f"Position {signal.symbol}: {current_pct:.2%} vs limit {limit:.2%}"),
+            metric_value=current_pct,
+            limit_value=limit,
         )
 
 
@@ -154,32 +155,32 @@ class MaxOpenPositionsValidator(RiskValidator):
 
     async def validate(
         self,
-        signal:          SignalEvent,
-        portfolio:       IPortfolioEngine,
+        signal: SignalEvent,
+        portfolio: IPortfolioEngine,
         returns_history: pd.Series,
     ) -> ValidationResult:
         # FLAT signals always pass — we must allow closes
         if signal.direction == "FLAT":
             return ValidationResult(
-                approved       = True,
-                validator_name = self.name,
-                message        = "Exit signal — position count check bypassed",
+                approved=True,
+                validator_name=self.name,
+                message="Exit signal — position count check bypassed",
             )
 
-        positions  = portfolio.get_positions()
+        positions = portfolio.get_positions()
         open_count = len(positions)
-        limit      = self._settings.max_open_positions
+        limit = self._settings.max_open_positions
         # Already has a position in this symbol → not adding a new one
-        already_has  = signal.symbol in positions
+        already_has = signal.symbol in positions
         effective_new = open_count if already_has else open_count + 1
-        approved      = effective_new <= limit
+        approved = effective_new <= limit
 
         return ValidationResult(
-            approved       = approved,
-            validator_name = self.name,
-            message        = f"Open positions: {open_count}/{limit}",
-            metric_value   = float(open_count),
-            limit_value    = float(limit),
+            approved=approved,
+            validator_name=self.name,
+            message=f"Open positions: {open_count}/{limit}",
+            metric_value=float(open_count),
+            limit_value=float(limit),
         )
 
 
@@ -194,33 +195,30 @@ class DailyLossValidator(RiskValidator):
 
     async def validate(
         self,
-        signal:          SignalEvent,
-        portfolio:       IPortfolioEngine,
+        signal: SignalEvent,
+        portfolio: IPortfolioEngine,
         returns_history: pd.Series,
     ) -> ValidationResult:
-        equity     = float(portfolio.get_equity())
+        equity = float(portfolio.get_equity())
         if equity <= 0:
             return ValidationResult(
-                approved       = False,
-                validator_name = self.name,
-                message        = "Cannot calculate daily loss without equity",
+                approved=False,
+                validator_name=self.name,
+                message="Cannot calculate daily loss without equity",
             )
 
         # FIX BUG-04: daily scope, not cumulative
-        daily_pnl      = float(portfolio.get_daily_pnl())
-        daily_loss_pct = min(0.0, daily_pnl / equity)   # negative = loss
-        limit          = -self._settings.max_daily_loss_pct
-        approved       = daily_loss_pct > limit
+        daily_pnl = float(portfolio.get_daily_pnl())
+        daily_loss_pct = min(0.0, daily_pnl / equity)  # negative = loss
+        limit = -self._settings.max_daily_loss_pct
+        approved = daily_loss_pct > limit
 
         return ValidationResult(
-            approved       = approved,
-            validator_name = self.name,
-            message        = (
-                f"Daily P&L: {daily_pnl:+.2f} ({daily_loss_pct:.2%}) | "
-                f"Limit: {limit:.2%}"
-            ),
-            metric_value   = daily_loss_pct,
-            limit_value    = limit,
+            approved=approved,
+            validator_name=self.name,
+            message=(f"Daily P&L: {daily_pnl:+.2f} ({daily_loss_pct:.2%}) | Limit: {limit:.2%}"),
+            metric_value=daily_loss_pct,
+            limit_value=limit,
         )
 
 
@@ -240,19 +238,19 @@ class VaRValidator(RiskValidator):
 
     async def validate(
         self,
-        signal:          SignalEvent,
-        portfolio:       IPortfolioEngine,
+        signal: SignalEvent,
+        portfolio: IPortfolioEngine,
         returns_history: pd.Series,
     ) -> ValidationResult:
         if len(returns_history) < 30:
             logger.warning("Insufficient return history for VaR calculation")
             return ValidationResult(
-                approved       = True,
-                validator_name = self.name,
-                message        = "Insufficient history — VaR check skipped",
+                approved=True,
+                validator_name=self.name,
+                message="Insufficient history — VaR check skipped",
             )
 
-        loop    = asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
         var_pct = await loop.run_in_executor(
             self._executor,
             self._compute_historical_var,
@@ -260,20 +258,20 @@ class VaRValidator(RiskValidator):
             self._settings.var_confidence_level,
         )
 
-        equity  = float(portfolio.get_equity())
+        equity = float(portfolio.get_equity())
         var_abs = var_pct * equity
-        limit   = self._settings.max_portfolio_var_pct
+        limit = self._settings.max_portfolio_var_pct
         approved = var_pct <= limit
 
         return ValidationResult(
-            approved       = approved,
-            validator_name = self.name,
-            message        = (
+            approved=approved,
+            validator_name=self.name,
+            message=(
                 f"1-day {self._settings.var_confidence_level:.0%} VaR = "
                 f"{var_pct:.3%} (${var_abs:,.0f}) | Limit: {limit:.3%}"
             ),
-            metric_value   = var_pct,
-            limit_value    = limit,
+            metric_value=var_pct,
+            limit_value=limit,
         )
 
     @staticmethod
@@ -293,38 +291,37 @@ class DrawdownValidator(RiskValidator):
 
     async def validate(
         self,
-        signal:          SignalEvent,
-        portfolio:       IPortfolioEngine,
+        signal: SignalEvent,
+        portfolio: IPortfolioEngine,
         returns_history: pd.Series,
     ) -> ValidationResult:
         if returns_history.empty:
             return ValidationResult(
-                approved       = True,
-                validator_name = self.name,
-                message        = "No history — drawdown check skipped",
+                approved=True,
+                validator_name=self.name,
+                message="No history — drawdown check skipped",
             )
 
         cum_returns = (1 + returns_history).cumprod()
-        peak        = cum_returns.cummax()
-        dd_series   = (cum_returns - peak) / peak
-        current_dd  = abs(float(dd_series.iloc[-1]))
-        limit       = self._settings.max_drawdown_pct
-        approved    = current_dd < limit
+        peak = cum_returns.cummax()
+        dd_series = (cum_returns - peak) / peak
+        current_dd = abs(float(dd_series.iloc[-1]))
+        limit = self._settings.max_drawdown_pct
+        approved = current_dd < limit
 
         return ValidationResult(
-            approved       = approved,
-            validator_name = self.name,
-            message        = (
-                f"Drawdown {current_dd:.2%} vs limit {limit:.2%}"
-            ),
-            metric_value   = current_dd,
-            limit_value    = limit,
+            approved=approved,
+            validator_name=self.name,
+            message=(f"Drawdown {current_dd:.2%} vs limit {limit:.2%}"),
+            metric_value=current_dd,
+            limit_value=limit,
         )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Circuit Breaker — FAULT-03: Added HALF_OPEN state with auto-recovery
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class CircuitBreaker:
     """
@@ -345,8 +342,8 @@ class CircuitBreaker:
         HALF_OPEN ─(fail)──► OPEN
     """
 
-    CLOSED    = "CLOSED"
-    OPEN      = "OPEN"
+    CLOSED = "CLOSED"
+    OPEN = "OPEN"
     HALF_OPEN = "HALF_OPEN"
 
     def __init__(self, half_open_after_seconds: float = 3600.0) -> None:
@@ -355,11 +352,11 @@ class CircuitBreaker:
             half_open_after_seconds: Seconds after tripping before HALF_OPEN.
                                      Default 1 hour.
         """
-        self._state:               str                = self.CLOSED
-        self._triggered_at:        Optional[datetime] = None
-        self._breach_count:        int                = 0
-        self._half_open_after:     timedelta          = timedelta(seconds=half_open_after_seconds)
-        self._half_open_probe_sent: bool              = False
+        self._state: str = self.CLOSED
+        self._triggered_at: Optional[datetime] = None
+        self._breach_count: int = 0
+        self._half_open_after: timedelta = timedelta(seconds=half_open_after_seconds)
+        self._half_open_probe_sent: bool = False
 
     @property
     def state(self) -> str:
@@ -397,22 +394,22 @@ class CircuitBreaker:
             "Circuit breaker → CLOSED (recovery confirmed)",
             extra={"operator_id": operator_id, "breach_count": self._breach_count},
         )
-        self._state               = self.CLOSED
-        self._triggered_at        = None
+        self._state = self.CLOSED
+        self._triggered_at = None
         self._half_open_probe_sent = False
 
     def trip(self, reason: str) -> None:
         """Open the circuit breaker, halting all new order submission."""
-        self._state        = self.OPEN
+        self._state = self.OPEN
         # FIX BUG-05: timezone-aware timestamp
         self._triggered_at = datetime.now(timezone.utc)
         self._breach_count += 1
         logger.critical(
             "CIRCUIT BREAKER TRIPPED",
             extra={
-                "reason":        reason,
-                "breach_count":  self._breach_count,
-                "triggered_at":  self._triggered_at.isoformat(),
+                "reason": reason,
+                "breach_count": self._breach_count,
+                "triggered_at": self._triggered_at.isoformat(),
             },
         )
 
@@ -421,19 +418,20 @@ class CircuitBreaker:
         logger.warning(
             "Circuit breaker manually reset",
             extra={
-                "operator_id":    operator_id,
+                "operator_id": operator_id,
                 "previous_state": self._state,
-                "breach_count":   self._breach_count,
+                "breach_count": self._breach_count,
             },
         )
-        self._state               = self.CLOSED
-        self._triggered_at        = None
+        self._state = self.CLOSED
+        self._triggered_at = None
         self._half_open_probe_sent = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Risk Engine (Orchestrator)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class RiskEngine:
     """
@@ -452,19 +450,17 @@ class RiskEngine:
 
     def __init__(
         self,
-        portfolio:         IPortfolioEngine,
-        event_bus:         object,
-        settings:          Optional[RiskSettings] = None,
-        returns_provider:  Optional[Callable]     = None,
+        portfolio: IPortfolioEngine,
+        event_bus: object,
+        settings: Optional[RiskSettings] = None,
+        returns_provider: Optional[Callable] = None,
     ) -> None:
-        self._portfolio        = portfolio
-        self._event_bus        = event_bus
-        self._settings         = settings or get_settings().risk
+        self._portfolio = portfolio
+        self._event_bus = event_bus
+        self._settings = settings or get_settings().risk
         self._returns_provider = returns_provider
-        self._circuit_breaker  = CircuitBreaker(half_open_after_seconds=3600.0)
-        self._executor         = ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="risk-var"
-        )
+        self._circuit_breaker = CircuitBreaker(half_open_after_seconds=3600.0)
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="risk-var")
 
         self._validators: list[RiskValidator] = [
             PositionLimitValidator(self._settings),
@@ -477,10 +473,10 @@ class RiskEngine:
         logger.info(
             "Risk Engine initialised",
             extra={
-                "validators":      [v.name for v in self._validators],
-                "max_drawdown":    self._settings.max_drawdown_pct,
-                "var_confidence":  self._settings.var_confidence_level,
-                "max_daily_loss":  self._settings.max_daily_loss_pct,
+                "validators": [v.name for v in self._validators],
+                "max_drawdown": self._settings.max_drawdown_pct,
+                "var_confidence": self._settings.var_confidence_level,
+                "max_daily_loss": self._settings.max_daily_loss_pct,
             },
         )
 
@@ -535,10 +531,10 @@ class RiskEngine:
                     "Risk validator result",
                     extra={
                         "validator": result.validator_name,
-                        "approved":  result.approved,
-                        "message":   result.message,
-                        "metric":    result.metric_value,
-                        "limit":     result.limit_value,
+                        "approved": result.approved,
+                        "message": result.message,
+                        "metric": result.metric_value,
+                        "limit": result.limit_value,
                         "signal_id": signal.event_id,
                     },
                 )
@@ -575,12 +571,12 @@ class RiskEngine:
         action = "FLATTEN" if result.validator_name in critical_validators else "BLOCK_NEW"
 
         breach_event = RiskBreachEvent(
-            source         = "risk_engine",
-            breach_type    = result.validator_name,
-            current_value  = result.metric_value,
-            limit_value    = result.limit_value,
-            action         = action,
-            correlation_id = signal.correlation_id,
+            source="risk_engine",
+            breach_type=result.validator_name,
+            current_value=result.metric_value,
+            limit_value=result.limit_value,
+            action=action,
+            correlation_id=signal.correlation_id,
         )
 
         try:
@@ -596,18 +592,18 @@ class RiskEngine:
             "Risk breach detected",
             extra={
                 "breach_type": result.validator_name,
-                "action":      action,
-                "message":     result.message,
-                "metric":      result.metric_value,
-                "limit":       result.limit_value,
-                "symbol":      signal.symbol,
+                "action": action,
+                "message": result.message,
+                "metric": result.metric_value,
+                "limit": result.limit_value,
+                "symbol": signal.symbol,
             },
         )
 
     async def calculate_var(
         self,
         confidence_level: float = 0.99,
-        horizon_days:     int   = 1,
+        horizon_days: int = 1,
     ) -> float:
         """Portfolio VaR via Historical Simulation."""
         returns = pd.Series(dtype=float)
@@ -621,14 +617,14 @@ class RiskEngine:
                 returns = result
         if returns.empty:
             return 0.0
-        loop   = asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
         var_1d = await loop.run_in_executor(
             self._executor,
             VaRValidator._compute_historical_var,
             returns,
             confidence_level,
         )
-        return var_1d * (horizon_days ** 0.5)
+        return var_1d * (horizon_days**0.5)
 
     async def calculate_cvar(self, confidence_level: float = 0.99) -> float:
         """Conditional VaR (Expected Shortfall)."""
@@ -655,7 +651,7 @@ class RiskEngine:
         if len(clean) == 0:
             return 0.0
         var_threshold = np.percentile(clean, (1.0 - confidence) * 100)
-        tail_losses   = clean[clean <= var_threshold]
+        tail_losses = clean[clean <= var_threshold]
         return abs(float(np.mean(tail_losses))) if len(tail_losses) > 0 else abs(var_threshold)
 
     async def get_current_drawdown(self) -> float:
@@ -671,9 +667,9 @@ class RiskEngine:
                 returns = result
         if returns.empty:
             return 0.0
-        cum  = (1 + returns).cumprod()
+        cum = (1 + returns).cumprod()
         peak = cum.cummax()
-        dd   = (cum - peak) / peak
+        dd = (cum - peak) / peak
         return abs(float(dd.iloc[-1]))
 
     def reset_circuit_breaker(self, operator_id: str) -> None:

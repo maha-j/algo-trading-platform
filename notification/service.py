@@ -28,11 +28,10 @@ Design decisions
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import smtplib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from enum import Enum
@@ -48,20 +47,21 @@ settings = get_settings()
 # Severity levels
 # ---------------------------------------------------------------------------
 
+
 class AlertLevel(str, Enum):
-    DEBUG    = "DEBUG"
-    INFO     = "INFO"
-    WARNING  = "WARNING"
-    ERROR    = "ERROR"
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
     CRITICAL = "CRITICAL"
 
     @property
     def emoji(self) -> str:
         return {
-            "DEBUG":    "🔍",
-            "INFO":     "ℹ️",
-            "WARNING":  "⚠️",
-            "ERROR":    "❌",
+            "DEBUG": "🔍",
+            "INFO": "ℹ️",
+            "WARNING": "⚠️",
+            "ERROR": "❌",
             "CRITICAL": "🚨",
         }[self.value]
 
@@ -69,10 +69,10 @@ class AlertLevel(str, Enum):
     def color(self) -> str:
         """Slack attachment colour."""
         return {
-            "DEBUG":    "#808080",
-            "INFO":     "#36a64f",
-            "WARNING":  "#ffcc00",
-            "ERROR":    "#ff4444",
+            "DEBUG": "#808080",
+            "INFO": "#36a64f",
+            "WARNING": "#ffcc00",
+            "ERROR": "#ff4444",
             "CRITICAL": "#cc0000",
         }[self.value]
 
@@ -81,11 +81,12 @@ class AlertLevel(str, Enum):
 # Token-bucket rate limiter (for Telegram)
 # ---------------------------------------------------------------------------
 
+
 class TokenBucket:
     """Thread-safe token-bucket rate limiter."""
 
     def __init__(self, rate: float, capacity: float) -> None:
-        self._rate = rate          # tokens per second
+        self._rate = rate  # tokens per second
         self._capacity = capacity  # max burst
         self._tokens = capacity
         self._last_refill = time.monotonic()
@@ -105,6 +106,7 @@ class TokenBucket:
 # ---------------------------------------------------------------------------
 # Per-channel circuit breaker
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ChannelCircuitBreaker:
@@ -132,6 +134,7 @@ class ChannelCircuitBreaker:
 # Telegram Channel
 # ---------------------------------------------------------------------------
 
+
 class TelegramChannel:
     """
     Sends alerts via Telegram Bot API.
@@ -141,10 +144,10 @@ class TelegramChannel:
     API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
     def __init__(self) -> None:
-        self._token    = settings.notification.telegram_token.get_secret_value()
-        self._chat_id  = settings.notification.telegram_chat_id
-        self._limiter  = TokenBucket(rate=25, capacity=30)  # 25/sec, burst 30
-        self._breaker  = ChannelCircuitBreaker()
+        self._token = settings.notification.telegram_token.get_secret_value()
+        self._chat_id = settings.notification.telegram_chat_id
+        self._limiter = TokenBucket(rate=25, capacity=30)  # 25/sec, burst 30
+        self._breaker = ChannelCircuitBreaker()
         self.channel_name = "telegram"
 
     async def send(self, subject: str, body: str, level: AlertLevel = AlertLevel.INFO) -> bool:
@@ -156,17 +159,15 @@ class TelegramChannel:
 
         await self._limiter.acquire()
 
-        text = (
-            f"{level.emoji} *{self._escape(subject)}*\n\n"
-            f"{self._escape(body)}"
-        )
+        text = f"{level.emoji} *{self._escape(subject)}*\n\n{self._escape(body)}"
 
         try:
             import aiohttp
+
             url = self.API_BASE.format(token=self._token)
             payload = {
-                "chat_id":    self._chat_id,
-                "text":       text,
+                "chat_id": self._chat_id,
+                "text": text,
                 "parse_mode": "MarkdownV2",
             }
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
@@ -196,6 +197,7 @@ class TelegramChannel:
 # Email (SMTP) Channel
 # ---------------------------------------------------------------------------
 
+
 class EmailChannel:
     """
     Sends HTML-formatted alerts and daily reports via SMTP.
@@ -203,13 +205,13 @@ class EmailChannel:
     """
 
     def __init__(self) -> None:
-        self._host     = settings.notification.smtp_host
-        self._port     = settings.notification.smtp_port
-        self._user     = settings.notification.smtp_user
+        self._host = settings.notification.smtp_host
+        self._port = settings.notification.smtp_port
+        self._user = settings.notification.smtp_user
         self._password = settings.notification.smtp_password.get_secret_value()
-        self._from     = settings.notification.smtp_from_email
-        self._to       = settings.notification.alert_email_to
-        self._breaker  = ChannelCircuitBreaker()
+        self._from = settings.notification.smtp_from_email
+        self._to = settings.notification.alert_email_to
+        self._breaker = ChannelCircuitBreaker()
         self.channel_name = "email"
 
     async def send(self, subject: str, body: str, level: AlertLevel = AlertLevel.INFO) -> bool:
@@ -232,8 +234,8 @@ class EmailChannel:
     def _send_sync(self, subject: str, body: str, level: AlertLevel) -> None:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"[{level.value}] {subject}"
-        msg["From"]    = self._from
-        msg["To"]      = self._to
+        msg["From"] = self._from
+        msg["To"] = self._to
 
         html = self._html_template(subject, body, level)
         msg.attach(MIMEText(body, "plain"))
@@ -267,6 +269,7 @@ class EmailChannel:
 # Webhook Channel (Slack / Discord / PagerDuty)
 # ---------------------------------------------------------------------------
 
+
 class WebhookChannel:
     """
     Generic webhook delivery.  Supports Slack-compatible Block Kit payloads,
@@ -274,8 +277,8 @@ class WebhookChannel:
     """
 
     def __init__(self, url: Optional[str] = None, format: str = "slack") -> None:
-        self._url     = url or settings.notification.webhook_url
-        self._format  = format
+        self._url = url or settings.notification.webhook_url
+        self._format = format
         self._breaker = ChannelCircuitBreaker()
         self.channel_name = "webhook"
 
@@ -288,6 +291,7 @@ class WebhookChannel:
         payload = self._build_payload(subject, body, level)
         try:
             import aiohttp
+
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
                 async with session.post(self._url, json=payload) as resp:
                     if resp.status in (200, 204):
@@ -304,21 +308,25 @@ class WebhookChannel:
     def _build_payload(self, subject: str, body: str, level: AlertLevel) -> dict:
         if self._format == "slack":
             return {
-                "attachments": [{
-                    "color":  level.color,
-                    "title":  f"{level.emoji} {subject}",
-                    "text":   body,
-                    "footer": "Trading Platform",
-                    "ts":     int(time.time()),
-                }]
+                "attachments": [
+                    {
+                        "color": level.color,
+                        "title": f"{level.emoji} {subject}",
+                        "text": body,
+                        "footer": "Trading Platform",
+                        "ts": int(time.time()),
+                    }
+                ]
             }
         elif self._format == "discord":
             return {
-                "embeds": [{
-                    "title":       f"{level.emoji} {subject}",
-                    "description": body,
-                    "color":       int(level.color.lstrip("#"), 16),
-                }]
+                "embeds": [
+                    {
+                        "title": f"{level.emoji} {subject}",
+                        "description": body,
+                        "color": int(level.color.lstrip("#"), 16),
+                    }
+                ]
             }
         else:
             return {"level": level.value, "subject": subject, "body": body, "ts": time.time()}
@@ -327,6 +335,7 @@ class WebhookChannel:
 # ---------------------------------------------------------------------------
 # Notification Service (router)
 # ---------------------------------------------------------------------------
+
 
 class NotificationService:
     """
@@ -341,10 +350,10 @@ class NotificationService:
     """
 
     ROUTING: Dict[str, List[str]] = {
-        "DEBUG":    [],
-        "INFO":     ["webhook"],
-        "WARNING":  ["telegram", "webhook"],
-        "ERROR":    ["telegram", "email", "webhook"],
+        "DEBUG": [],
+        "INFO": ["webhook"],
+        "WARNING": ["telegram", "webhook"],
+        "ERROR": ["telegram", "email", "webhook"],
         "CRITICAL": ["telegram", "email", "webhook"],
     }
 

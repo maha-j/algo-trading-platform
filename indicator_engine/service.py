@@ -21,7 +21,6 @@ Design decisions
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -29,13 +28,16 @@ import pandas as pd
 
 try:
     from numba import njit
+
     NUMBA_AVAILABLE = True
 except ImportError:
     # Fallback: identity decorator so code runs without Numba installed
     def njit(*args, **kwargs):
         def wrapper(fn):
             return fn
+
         return wrapper if args and callable(args[0]) else wrapper
+
     NUMBA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Numba-JIT kernels (pure NumPy arrays, no Pandas inside)
 # ---------------------------------------------------------------------------
+
 
 @njit(cache=True)
 def _ema_kernel(values: np.ndarray, period: int) -> np.ndarray:
@@ -57,7 +60,7 @@ def _ema_kernel(values: np.ndarray, period: int) -> np.ndarray:
         start += 1
     if start + period > len(values):
         return out
-    seed = np.mean(values[start:start + period])
+    seed = np.mean(values[start : start + period])
     out[start + period - 1] = seed
     for i in range(start + period, len(values)):
         if np.isnan(values[i]):
@@ -124,7 +127,7 @@ def _sma_kernel(values: np.ndarray, period: int) -> np.ndarray:
     out = np.empty(n, dtype=np.float64)
     out[:] = np.nan
     for i in range(period - 1, n):
-        out[i] = np.mean(values[i - period + 1: i + 1])
+        out[i] = np.mean(values[i - period + 1 : i + 1])
     return out
 
 
@@ -135,7 +138,7 @@ def _stddev_kernel(values: np.ndarray, period: int) -> np.ndarray:
     out = np.empty(n, dtype=np.float64)
     out[:] = np.nan
     for i in range(period - 1, n):
-        window = values[i - period + 1: i + 1]
+        window = values[i - period + 1 : i + 1]
         mean = np.mean(window)
         variance = np.mean((window - mean) ** 2)
         out[i] = np.sqrt(variance)
@@ -151,8 +154,8 @@ def _stochastic_kernel(
     k = np.empty(n, dtype=np.float64)
     k[:] = np.nan
     for i in range(k_period - 1, n):
-        hh = np.max(high[i - k_period + 1: i + 1])
-        ll = np.min(low[i - k_period + 1: i + 1])
+        hh = np.max(high[i - k_period + 1 : i + 1])
+        ll = np.min(low[i - k_period + 1 : i + 1])
         rng = hh - ll
         k[i] = ((close[i] - ll) / rng * 100.0) if rng != 0.0 else 50.0
 
@@ -163,6 +166,7 @@ def _stochastic_kernel(
 # ---------------------------------------------------------------------------
 # High-level indicator functions (return pandas Series)
 # ---------------------------------------------------------------------------
+
 
 def compute_ema(df: pd.DataFrame, period: int, column: str = "close") -> pd.Series:
     arr = df[column].to_numpy(dtype=np.float64)
@@ -177,8 +181,8 @@ def compute_rsi(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 def compute_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    high  = df["high"].to_numpy(dtype=np.float64)
-    low   = df["low"].to_numpy(dtype=np.float64)
+    high = df["high"].to_numpy(dtype=np.float64)
+    low = df["low"].to_numpy(dtype=np.float64)
     close = df["close"].to_numpy(dtype=np.float64)
     result = _atr_kernel(high, low, close, period)
     return pd.Series(result, index=df.index, name=f"ATR_{period}")
@@ -199,9 +203,9 @@ def compute_macd(
     histogram = macd_line - signal_line
     return pd.DataFrame(
         {
-            "macd_line":   macd_line,
+            "macd_line": macd_line,
             "signal_line": signal_line,
-            "histogram":   histogram,
+            "histogram": histogram,
         },
         index=df.index,
     )
@@ -214,8 +218,8 @@ def compute_bollinger_bands(
 ) -> pd.DataFrame:
     """Returns DataFrame with columns: bb_mid, bb_upper, bb_lower, bb_width."""
     arr = df["close"].to_numpy(dtype=np.float64)
-    mid  = _sma_kernel(arr, period)
-    std  = _stddev_kernel(arr, period)
+    mid = _sma_kernel(arr, period)
+    std = _stddev_kernel(arr, period)
     upper = mid + num_std * std
     lower = mid - num_std * std
     width = (upper - lower) / mid
@@ -225,11 +229,9 @@ def compute_bollinger_bands(
     )
 
 
-def compute_stochastic(
-    df: pd.DataFrame, k_period: int = 14, d_period: int = 3
-) -> pd.DataFrame:
-    high  = df["high"].to_numpy(dtype=np.float64)
-    low   = df["low"].to_numpy(dtype=np.float64)
+def compute_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> pd.DataFrame:
+    high = df["high"].to_numpy(dtype=np.float64)
+    low = df["low"].to_numpy(dtype=np.float64)
     close = df["close"].to_numpy(dtype=np.float64)
     k_arr, d_arr = _stochastic_kernel(high, low, close, k_period, d_period)
     return pd.DataFrame(
@@ -251,7 +253,7 @@ def compute_vwap(df: pd.DataFrame) -> pd.Series:
 
     date_key = df.index.date
     cum_tp_vol = tp_vol.groupby(date_key).cumsum()
-    cum_vol    = df["volume"].groupby(date_key).cumsum()
+    cum_vol = df["volume"].groupby(date_key).cumsum()
     vwap = cum_tp_vol / cum_vol
     vwap.name = "VWAP"
     return vwap
@@ -262,28 +264,30 @@ def compute_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     Average Directional Index — measures trend strength (not direction).
     Returns DataFrame with: +DI, -DI, ADX.
     """
-    high  = df["high"].to_numpy(dtype=np.float64)
-    low   = df["low"].to_numpy(dtype=np.float64)
+    high = df["high"].to_numpy(dtype=np.float64)
+    low = df["low"].to_numpy(dtype=np.float64)
     close = df["close"].to_numpy(dtype=np.float64)
     n = len(close)
 
-    plus_dm  = np.zeros(n)
+    plus_dm = np.zeros(n)
     minus_dm = np.zeros(n)
     for i in range(1, n):
-        up   = high[i] - high[i - 1]
+        up = high[i] - high[i - 1]
         down = low[i - 1] - low[i]
-        plus_dm[i]  = up   if up > down and up > 0 else 0.0
+        plus_dm[i] = up if up > down and up > 0 else 0.0
         minus_dm[i] = down if down > up and down > 0 else 0.0
 
     atr = _atr_kernel(high, low, close, period)
-    sm_plus  = _ema_kernel(plus_dm,  period)
+    sm_plus = _ema_kernel(plus_dm, period)
     sm_minus = _ema_kernel(minus_dm, period)
 
-    plus_di  = 100.0 * sm_plus  / np.where(atr == 0, 1e-9, atr)
+    plus_di = 100.0 * sm_plus / np.where(atr == 0, 1e-9, atr)
     minus_di = 100.0 * sm_minus / np.where(atr == 0, 1e-9, atr)
 
-    dx = 100.0 * np.abs(plus_di - minus_di) / np.where(
-        (plus_di + minus_di) == 0, 1e-9, plus_di + minus_di
+    dx = (
+        100.0
+        * np.abs(plus_di - minus_di)
+        / np.where((plus_di + minus_di) == 0, 1e-9, plus_di + minus_di)
     )
     adx = _ema_kernel(dx, period)
 

@@ -21,7 +21,7 @@ Architecture:
 Plugin System:
     @strategy_registry.register("ema_crossover_v1")
     class EMACrossoverStrategy(BaseStrategy): ...
-    
+
     Strategies auto-register when their module is imported.
     Lazy loading is supported for memory efficiency in backtesting.
 """
@@ -32,13 +32,12 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Any, Callable, ClassVar, Type
+from typing import Any, Callable, Type
 
 import pandas as pd
 
 from core.domain.events import BarEvent, SignalEvent, TickEvent
-from core.interfaces import IIndicator, IStrategy
+from core.interfaces import IIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +45,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 # Strategy Registry (Plugin Pattern)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class StrategyRegistry:
     """
@@ -77,12 +77,14 @@ class StrategyRegistry:
             @registry.register("ema_cross_v1", {"fast_period": 9, "slow_period": 21})
             class EMACrossStrategy(BaseStrategy): ...
         """
+
         def decorator(cls: Type["BaseStrategy"]) -> Type["BaseStrategy"]:
             if strategy_id in self._registry:
                 logger.warning(f"Strategy '{strategy_id}' is being re-registered")
             self._registry[strategy_id] = (cls, default_config or {})
             logger.debug(f"Strategy registered: '{strategy_id}'")
             return cls
+
         return decorator
 
     def create(
@@ -105,8 +107,7 @@ class StrategyRegistry:
         """
         if strategy_id not in self._registry:
             raise KeyError(
-                f"Strategy '{strategy_id}' not found. "
-                f"Available: {list(self._registry.keys())}"
+                f"Strategy '{strategy_id}' not found. Available: {list(self._registry.keys())}"
             )
         cls, defaults = self._registry[strategy_id]
         merged = {**defaults, **(config or {})}
@@ -124,6 +125,7 @@ strategy_registry = StrategyRegistry()
 # ─────────────────────────────────────────────────────────────────────────────
 # Base Strategy
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class BaseStrategy(ABC):
     """
@@ -234,21 +236,25 @@ class BaseStrategy(ABC):
         key = f"{event.symbol}_{event.timeframe}"
 
         # Append new bar to history buffer
-        new_row = pd.DataFrame([{
-            "timestamp": event.timestamp,
-            "open": float(event.open),
-            "high": float(event.high),
-            "low": float(event.low),
-            "close": float(event.close),
-            "volume": float(event.volume),
-        }]).set_index("timestamp")
+        new_row = pd.DataFrame(
+            [
+                {
+                    "timestamp": event.timestamp,
+                    "open": float(event.open),
+                    "high": float(event.high),
+                    "low": float(event.low),
+                    "close": float(event.close),
+                    "volume": float(event.volume),
+                }
+            ]
+        ).set_index("timestamp")
 
         if key not in self._bar_history:
             self._bar_history[key] = new_row
         else:
-            self._bar_history[key] = pd.concat(
-                [self._bar_history[key], new_row]
-            ).tail(self._get_history_length())
+            self._bar_history[key] = pd.concat([self._bar_history[key], new_row]).tail(
+                self._get_history_length()
+            )
 
         self._bar_count[key] += 1
         df = self._bar_history[key].copy()
@@ -367,6 +373,7 @@ class BaseStrategy(ABC):
 # EMA Crossover — Concrete Strategy Example
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @strategy_registry.register(
     "ema_crossover_v1",
     {"fast_period": 9, "slow_period": 21, "atr_period": 14, "min_atr_mult": 0.5},
@@ -407,9 +414,7 @@ class EMACrossoverStrategy(BaseStrategy):
         fast = self._config.get("fast_period", 9)
         slow = self._config.get("slow_period", 21)
         if fast >= slow:
-            raise ValueError(
-                f"fast_period ({fast}) must be < slow_period ({slow})"
-            )
+            raise ValueError(f"fast_period ({fast}) must be < slow_period ({slow})")
 
     async def _generate_signal(self, symbol: str, df: pd.DataFrame) -> str | None:
         """
@@ -480,6 +485,7 @@ class EMACrossoverStrategy(BaseStrategy):
 # Strategy Engine (Orchestrator)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class StrategyEngine:
     """
     Manages the lifecycle of active strategies and routes market events.
@@ -530,9 +536,7 @@ class StrategyEngine:
             return
         strategy = self._active_strategies.pop(strategy_id)
         for symbol in strategy.symbols:
-            self._symbol_index[symbol] = [
-                s for s in self._symbol_index[symbol] if s != strategy_id
-            ]
+            self._symbol_index[symbol] = [s for s in self._symbol_index[symbol] if s != strategy_id]
         logger.info(f"Strategy deregistered: {strategy_id}")
 
     async def on_bar(self, event: BarEvent) -> list[SignalEvent]:
