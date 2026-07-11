@@ -4,7 +4,7 @@ Execution Engine — Order routing, algorithmic execution, and broker integratio
 Design Decision:
     Execution is the highest-consequence layer in the platform.
     Errors here result in real financial losses.
-    
+
     Principles applied:
         1. Idempotency: every order has a client_order_id to prevent duplicates
         2. Atomic state: order state transitions are atomic (no partial updates)
@@ -15,7 +15,7 @@ Design Decision:
 Architecture:
     OrderRouter selects the execution algorithm based on order size and type.
     Each algorithm is a separate class implementing IExecutionAlgorithm.
-    
+
     Algorithm selection heuristics:
         < 0.1% ADV (avg daily volume) → MARKET
         0.1% - 1% ADV               → TWAP (30 min)
@@ -38,8 +38,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-import uuid
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -50,7 +48,6 @@ from typing import Any
 
 from config.settings import ExecutionSettings, get_settings
 from core.domain.events import FillEvent, OrderEvent
-from core.interfaces import IExecutionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +55,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 # Order State Machine
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class OrderState(str, Enum):
     """
@@ -68,6 +66,7 @@ class OrderState(str, Enum):
         PENDING_NEW → REJECTED
         ACCEPTED    → PENDING_CANCEL → CANCELLED
     """
+
     PENDING_NEW = "PENDING_NEW"
     ACCEPTED = "ACCEPTED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
@@ -108,20 +107,20 @@ class OrderRecord:
         valid_transitions = {
             OrderState.PENDING_NEW: {OrderState.ACCEPTED, OrderState.REJECTED},
             OrderState.ACCEPTED: {
-                OrderState.PARTIALLY_FILLED, OrderState.FILLED,
-                OrderState.CANCELLED, OrderState.EXPIRED,
+                OrderState.PARTIALLY_FILLED,
+                OrderState.FILLED,
+                OrderState.CANCELLED,
+                OrderState.EXPIRED,
             },
             OrderState.PARTIALLY_FILLED: {
-                OrderState.PARTIALLY_FILLED, OrderState.FILLED,
+                OrderState.PARTIALLY_FILLED,
+                OrderState.FILLED,
                 OrderState.CANCELLED,
             },
         }
         allowed = valid_transitions.get(self.state, set())
         if new_state not in allowed:
-            raise ValueError(
-                f"Invalid transition: {self.state} → {new_state}. "
-                f"Allowed: {allowed}"
-            )
+            raise ValueError(f"Invalid transition: {self.state} → {new_state}. Allowed: {allowed}")
         self.state = new_state
         self.updated_at = datetime.now(timezone.utc)
 
@@ -129,6 +128,7 @@ class OrderRecord:
 # ─────────────────────────────────────────────────────────────────────────────
 # Execution Algorithms
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class IExecutionAlgorithm(ABC):
     """Abstract base for execution algorithms (TWAP, VWAP, etc.)."""
@@ -275,7 +275,7 @@ class TWAPAlgorithm(IExecutionAlgorithm):
                 remaining -= qty
             except Exception as exc:
                 logger.error(
-                    f"TWAP child order {i+1}/{self._num_slices} failed: {exc}",
+                    f"TWAP child order {i + 1}/{self._num_slices} failed: {exc}",
                     extra={"order_id": order.order_id, "slice": i},
                     exc_info=True,
                 )
@@ -313,8 +313,15 @@ class VWAPAlgorithm(IExecutionAlgorithm):
 
     # Default U-shaped intraday volume profile (equity markets)
     DEFAULT_PROFILE: dict[int, float] = {
-        9: 0.15, 10: 0.12, 11: 0.10, 12: 0.06, 13: 0.05,
-        14: 0.07, 15: 0.12, 16: 0.18, 17: 0.15,
+        9: 0.15,
+        10: 0.12,
+        11: 0.10,
+        12: 0.06,
+        13: 0.05,
+        14: 0.07,
+        15: 0.12,
+        16: 0.18,
+        17: 0.15,
     }
 
     def __init__(
@@ -340,10 +347,7 @@ class VWAPAlgorithm(IExecutionAlgorithm):
     ) -> list[FillEvent]:
         """Execute order according to intraday volume profile."""
         current_hour = datetime.now(timezone.utc).hour
-        relevant_hours = sorted([
-            h for h in self._profile
-            if h >= current_hour
-        ])
+        relevant_hours = sorted([h for h in self._profile if h >= current_hour])
 
         if not relevant_hours:
             # Fallback to market if outside profile hours
@@ -394,6 +398,7 @@ class VWAPAlgorithm(IExecutionAlgorithm):
 # MT5 Broker Adapter
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class MT5BrokerAdapter:
     """
     MetaTrader 5 broker adapter using the official Python API.
@@ -438,7 +443,7 @@ class MT5BrokerAdapter:
     def _connect_sync(self) -> None:
         """Synchronous MT5 connection (runs in thread pool)."""
         try:
-            import MetaTrader5 as mt5
+            import MetaTrader5 as mt5  # noqa: N813
 
             kwargs: dict[str, Any] = {
                 "login": self._login,
@@ -473,7 +478,8 @@ class MT5BrokerAdapter:
 
     def _disconnect_sync(self) -> None:
         try:
-            import MetaTrader5 as mt5
+            import MetaTrader5 as mt5  # noqa: N813
+
             mt5.shutdown()
             self._connected = False
             logger.info("MT5 disconnected")
@@ -508,10 +514,8 @@ class MT5BrokerAdapter:
                         f"MT5 order failed after {attempt} attempts",
                         extra={"order_id": order.order_id, "error": str(exc)},
                     )
-                    raise RuntimeError(
-                        f"MT5 order submission failed: {exc}"
-                    ) from exc
-                wait = 2 ** attempt  # exponential backoff
+                    raise RuntimeError(f"MT5 order submission failed: {exc}") from exc
+                wait = 2**attempt  # exponential backoff
                 logger.warning(
                     f"MT5 order attempt {attempt} failed, retrying in {wait}s",
                     extra={"error": str(exc)},
@@ -523,7 +527,7 @@ class MT5BrokerAdapter:
     def _submit_market_sync(self, order: OrderEvent) -> FillEvent:
         """Synchronous MT5 order submission (runs in thread pool)."""
         try:
-            import MetaTrader5 as mt5
+            import MetaTrader5 as mt5  # noqa: N813
 
             action = mt5.TRADE_ACTION_DEAL
             order_type = mt5.ORDER_TYPE_BUY if order.side == "BUY" else mt5.ORDER_TYPE_SELL
@@ -541,7 +545,7 @@ class MT5BrokerAdapter:
                 "type": order_type,
                 "price": price,
                 "deviation": 20,  # max slippage in points
-                "magic": 12345,   # EA magic number
+                "magic": 12345,  # EA magic number
                 "comment": f"algo:{order.strategy_id[:20]}",
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
@@ -555,7 +559,9 @@ class MT5BrokerAdapter:
 
             fill_price = Decimal(str(result.price))
             signal_price = Decimal(str(price))
-            slippage = fill_price - signal_price if order.side == "BUY" else signal_price - fill_price
+            slippage = (
+                fill_price - signal_price if order.side == "BUY" else signal_price - fill_price
+            )
 
             return FillEvent(
                 source="mt5_broker",
@@ -573,6 +579,7 @@ class MT5BrokerAdapter:
             # Simulation mode when MT5 package is not available
             logger.debug("MT5 not available — returning simulated fill")
             import random
+
             sim_price = float(order.quantity) * (1 + random.uniform(-0.0001, 0.0001))
             return FillEvent(
                 source="mt5_simulator",
@@ -590,6 +597,7 @@ class MT5BrokerAdapter:
 # ─────────────────────────────────────────────────────────────────────────────
 # Execution Engine (Orchestrator)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class ExecutionEngine:
     """
@@ -655,9 +663,7 @@ class ExecutionEngine:
 
         # Idempotency check
         if order.order_id in self._submitted_ids:
-            logger.warning(
-                f"Duplicate order submission rejected: {order.order_id}"
-            )
+            logger.warning(f"Duplicate order submission rejected: {order.order_id}")
             return order.order_id
 
         self._submitted_ids.add(order.order_id)
@@ -738,11 +744,7 @@ class ExecutionEngine:
     async def get_open_orders(self) -> list[OrderEvent]:
         """Return all orders not in terminal state."""
         terminal = {OrderState.FILLED, OrderState.CANCELLED, OrderState.REJECTED}
-        return [
-            r.order_event
-            for r in self._open_orders.values()
-            if r.state not in terminal
-        ]
+        return [r.order_event for r in self._open_orders.values() if r.state not in terminal]
 
     async def get_fills(self, from_ts: float = 0.0) -> list[FillEvent]:
         """Return all fills since a Unix timestamp."""

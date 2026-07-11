@@ -16,15 +16,13 @@ Run with:
 
 from __future__ import annotations
 
-import asyncio
 import time
-from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
 import pytest
 
-BARS_200  = None   # populated by session fixture
+BARS_200 = None  # populated by session fixture
 BARS_1000 = None
 
 
@@ -34,17 +32,23 @@ def _make_bars(n: int) -> pd.DataFrame:
     rows = []
     for _ in range(n):
         p *= np.exp(np.random.normal(0, 0.001))
-        rows.append({"open": p*0.9999, "high": p*1.0005, "low": p*0.9995,
-                     "close": p, "volume": 1000.0})
+        rows.append(
+            {
+                "open": p * 0.9999,
+                "high": p * 1.0005,
+                "low": p * 0.9995,
+                "close": p,
+                "volume": 1000.0,
+            }
+        )
     return pd.DataFrame(rows, index=pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC"))
 
 
 class TestIndicatorBenchmarks:
-
     @pytest.fixture(autouse=True)
     def setup_bars(self):
         global BARS_200, BARS_1000
-        BARS_200  = _make_bars(200)
+        BARS_200 = _make_bars(200)
         BARS_1000 = _make_bars(1000)
 
     def test_ema_200bars_under_5ms(self):
@@ -64,7 +68,8 @@ class TestIndicatorBenchmarks:
 
     def test_rsi_200bars_under_5ms(self):
         from indicator_engine.service import compute_rsi
-        compute_rsi(BARS_200, 14)   # warm-up
+
+        compute_rsi(BARS_200, 14)  # warm-up
 
         t0 = time.perf_counter()
         for _ in range(100):
@@ -76,6 +81,7 @@ class TestIndicatorBenchmarks:
 
     def test_full_indicator_suite_under_50ms(self):
         from indicator_engine.service import IndicatorService
+
         svc = IndicatorService()
         svc.compute_all("EURUSD", "H1", BARS_200)  # warm-up
 
@@ -89,6 +95,7 @@ class TestIndicatorBenchmarks:
 
     def test_indicator_service_1000bars(self):
         from indicator_engine.service import IndicatorService
+
         svc = IndicatorService()
         svc.compute_all("EURUSD", "H1", BARS_1000)  # warm-up
 
@@ -102,19 +109,22 @@ class TestIndicatorBenchmarks:
 
 
 class TestPortfolioBenchmarks:
-
     @pytest.mark.asyncio
     async def test_on_fill_latency_under_0_5ms(self):
-        from portfolio_engine.service import PortfolioEngine
         from core.domain.events import FillEvent
+        from portfolio_engine.service import PortfolioEngine
 
         engine = PortfolioEngine(initial_capital=1_000_000.0)
 
         fills = [
             FillEvent(
-                source="bench", order_id=f"o{i}",
-                symbol=f"SYM{i % 10}", side="BUY" if i % 2 == 0 else "SELL",
-                quantity=1000.0, fill_price=1.0850 + i * 0.0001, commission=7.0,
+                source="bench",
+                order_id=f"o{i}",
+                symbol=f"SYM{i % 10}",
+                side="BUY" if i % 2 == 0 else "SELL",
+                quantity=1000.0,
+                fill_price=1.0850 + i * 0.0001,
+                commission=7.0,
             )
             for i in range(200)
         ]
@@ -132,15 +142,14 @@ class TestPortfolioBenchmarks:
 
 
 class TestBacktestBenchmarks:
-
     @pytest.mark.asyncio
     @pytest.mark.slow
     async def test_backtest_1000bars_under_10s(self):
-        from backtest_engine.service import BacktestEngine, BacktestConfig
+        from backtest_engine.service import BacktestConfig, BacktestEngine
         from strategy_engine.service import EMACrossoverStrategy
 
         bars = _make_bars(1000)
-        engine   = BacktestEngine(BacktestConfig())
+        engine = BacktestEngine(BacktestConfig())
         strategy = EMACrossoverStrategy()
 
         t0 = time.perf_counter()
@@ -154,15 +163,15 @@ class TestBacktestBenchmarks:
     @pytest.mark.asyncio
     @pytest.mark.slow
     async def test_backtest_throughput_bars_per_second(self):
-        from backtest_engine.service import BacktestEngine, BacktestConfig
+        from backtest_engine.service import BacktestConfig, BacktestEngine
         from strategy_engine.service import EMACrossoverStrategy
 
         bars = _make_bars(5000)
-        engine   = BacktestEngine(BacktestConfig())
+        engine = BacktestEngine(BacktestConfig())
         strategy = EMACrossoverStrategy()
 
         t0 = time.perf_counter()
-        result = await engine.run(strategy, bars, "EURUSD", "H1")
+        await engine.run(strategy, bars, "EURUSD", "H1")
         elapsed = time.perf_counter() - t0
 
         bars_per_sec = 5000 / elapsed

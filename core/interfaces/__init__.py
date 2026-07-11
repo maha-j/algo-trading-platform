@@ -38,9 +38,9 @@ class IMarketDataProvider(Protocol):
 
     async def get_historical_bars(
         self,
-        symbol:     str,
-        timeframe:  str,
-        count:      int,
+        symbol: str,
+        timeframe: str,
+        count: int,
     ) -> list[BarEvent]: ...
 
 
@@ -51,9 +51,9 @@ class IIndicatorEngine(Protocol):
     async def compute(
         self,
         indicator: str,
-        symbol:    str,
+        symbol: str,
         timeframe: str,
-        params:    dict[str, Any],
+        params: dict[str, Any],
     ) -> dict[str, Any]: ...
 
 
@@ -88,7 +88,7 @@ class IRiskEngine(Protocol):
     async def calculate_var(
         self,
         confidence_level: float,
-        horizon_days:     int,
+        horizon_days: int,
     ) -> float: ...
 
     async def calculate_cvar(self, confidence_level: float) -> float: ...
@@ -131,10 +131,10 @@ class IPortfolioEngine(Protocol):
 
     def calculate_position_size(
         self,
-        symbol:    str,
-        price:     float,
+        symbol: str,
+        price: float,
         daily_vol: float,
-        lot_size:  float,
+        lot_size: float,
     ) -> Decimal: ...
 
 

@@ -33,26 +33,27 @@ import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone, timedelta, timezone
-from typing import AsyncGenerator, Dict, List, Optional, Callable, Awaitable
+from datetime import datetime, timedelta, timezone
+from typing import AsyncGenerator, Awaitable, Callable, Dict, List, Optional
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-from core.domain.events import TickEvent, BarEvent
 from config.settings import get_settings
+from core.domain.events import BarEvent, TickEvent
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Type alias
 TickHandler = Callable[[TickEvent], Awaitable[None]]
-BarHandler  = Callable[[BarEvent], Awaitable[None]]
+BarHandler = Callable[[BarEvent], Awaitable[None]]
 
 
 # ---------------------------------------------------------------------------
 # Data Normalizer
 # ---------------------------------------------------------------------------
+
 
 class DataNormalizer:
     """
@@ -94,9 +95,9 @@ class DataNormalizer:
         data = [
             {
                 "timestamp": b.timestamp,
-                "open":  b.open,
-                "high":  b.high,
-                "low":   b.low,
+                "open": b.open,
+                "high": b.high,
+                "low": b.low,
                 "close": b.close,
                 "volume": b.volume,
             }
@@ -122,6 +123,7 @@ class DataNormalizer:
 # ---------------------------------------------------------------------------
 # MT5 Data Provider
 # ---------------------------------------------------------------------------
+
 
 class MT5DataProvider:
     """
@@ -158,7 +160,8 @@ class MT5DataProvider:
 
     def _mt5_connect(self) -> bool:
         try:
-            import MetaTrader5 as mt5
+            import MetaTrader5 as mt5  # noqa: N813
+
             if not mt5.initialize(
                 login=settings.mt5.login,
                 password=settings.mt5.password.get_secret_value(),
@@ -182,7 +185,8 @@ class MT5DataProvider:
 
     def _mt5_shutdown(self) -> None:
         try:
-            import MetaTrader5 as mt5
+            import MetaTrader5 as mt5  # noqa: N813
+
             mt5.shutdown()
         except Exception:
             pass
@@ -215,7 +219,8 @@ class MT5DataProvider:
 
     def _get_last_tick(self, symbol: str) -> Optional[dict]:
         try:
-            import MetaTrader5 as mt5
+            import MetaTrader5 as mt5  # noqa: N813
+
             tick = mt5.symbol_info_tick(symbol)
             if tick:
                 return {
@@ -229,6 +234,7 @@ class MT5DataProvider:
             pass
         # Simulation mode: return synthetic tick
         import random
+
         base = 1.08500
         spread = 0.00010
         bid = base + random.gauss(0, 0.00020)
@@ -252,7 +258,11 @@ class MT5DataProvider:
         bars = await self._loop.run_in_executor(
             self._executor,
             self._fetch_bars,
-            symbol, timeframe, start, end, count,
+            symbol,
+            timeframe,
+            start,
+            end,
+            count,
         )
         return bars
 
@@ -260,11 +270,15 @@ class MT5DataProvider:
         self, symbol: str, timeframe: str, start: datetime, end: datetime, count: int
     ) -> List[BarEvent]:
         try:
-            import MetaTrader5 as mt5
+            import MetaTrader5 as mt5  # noqa: N813
+
             tf_map = {
-                "M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5,
-                "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,
-                "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
+                "M1": mt5.TIMEFRAME_M1,
+                "M5": mt5.TIMEFRAME_M5,
+                "M15": mt5.TIMEFRAME_M15,
+                "M30": mt5.TIMEFRAME_M30,
+                "H1": mt5.TIMEFRAME_H1,
+                "H4": mt5.TIMEFRAME_H4,
                 "D1": mt5.TIMEFRAME_D1,
             }
             mt5_tf = tf_map.get(timeframe, mt5.TIMEFRAME_H1)
@@ -272,19 +286,33 @@ class MT5DataProvider:
             if rates is None:
                 return []
             return [
-                DataNormalizer.mt5_bar_to_event(dict(zip(
-                    ["time","open","high","low","close","tick_volume","spread","real_volume"],
-                    r
-                )), symbol, timeframe, i)
+                DataNormalizer.mt5_bar_to_event(
+                    dict(
+                        zip(
+                            [
+                                "time",
+                                "open",
+                                "high",
+                                "low",
+                                "close",
+                                "tick_volume",
+                                "spread",
+                                "real_volume",
+                            ],
+                            r,
+                        )
+                    ),
+                    symbol,
+                    timeframe,
+                    i,
+                )
                 for i, r in enumerate(rates)
             ]
         except Exception as exc:
             logger.warning("MT5 bars failed, using synthetic data: %s", exc)
             return self._generate_synthetic_bars(symbol, timeframe, count)
 
-    def _generate_synthetic_bars(
-        self, symbol: str, timeframe: str, count: int
-    ) -> List[BarEvent]:
+    def _generate_synthetic_bars(self, symbol: str, timeframe: str, count: int) -> List[BarEvent]:
         """Generate GBM price series for testing without MT5."""
         np.random.seed(42)
         price = 1.0850
@@ -292,7 +320,7 @@ class MT5DataProvider:
         mu, sigma = 0.02, 0.15
         bars = []
         now = datetime.now(timezone.utc)
-        minutes = {"M1":1,"M5":5,"M15":15,"M30":30,"H1":60,"H4":240,"D1":1440}
+        minutes = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
         interval = timedelta(minutes=minutes.get(timeframe, 60))
 
         for i in range(count):
@@ -301,20 +329,22 @@ class MT5DataProvider:
             price *= np.exp(ret)
             c = price
             h = max(o, c) * (1 + abs(np.random.normal(0, 0.0005)))
-            l = min(o, c) * (1 - abs(np.random.normal(0, 0.0005)))
-            bars.append(BarEvent(
-                source="synthetic",
-                symbol=symbol,
-                timeframe=timeframe,
-                open=round(o, 5),
-                high=round(h, 5),
-                low=round(l, 5),
-                close=round(c, 5),
-                volume=round(np.random.uniform(100, 2000), 2),
-                timestamp=now - interval * (count - i),
-                bar_index=i,
-                is_closed=True,
-            ))
+            lo = min(o, c) * (1 - abs(np.random.normal(0, 0.0005)))
+            bars.append(
+                BarEvent(
+                    source="synthetic",
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    open=round(o, 5),
+                    high=round(h, 5),
+                    low=round(lo, 5),
+                    close=round(c, 5),
+                    volume=round(np.random.uniform(100, 2000), 2),
+                    timestamp=now - interval * (count - i),
+                    bar_index=i,
+                    is_closed=True,
+                )
+            )
         return bars
 
     async def stream(self, symbol: str) -> AsyncGenerator[TickEvent, None]:
@@ -334,6 +364,7 @@ class MT5DataProvider:
 # ---------------------------------------------------------------------------
 # Binance Data Provider (Crypto)
 # ---------------------------------------------------------------------------
+
 
 class BinanceDataProvider:
     """
@@ -366,9 +397,7 @@ class BinanceDataProvider:
     async def subscribe(self, symbol: str, handler: TickHandler) -> None:
         """Subscribe to trade stream for a symbol."""
         stream = symbol.lower() + "@trade"
-        task = asyncio.create_task(
-            self._ws_loop(f"{self.BASE_WS}/{stream}", handler, symbol)
-        )
+        task = asyncio.create_task(self._ws_loop(f"{self.BASE_WS}/{stream}", handler, symbol))
         self._ws_tasks.append(task)
 
     async def _ws_loop(self, url: str, handler: TickHandler, symbol: str) -> None:
@@ -390,6 +419,7 @@ class BinanceDataProvider:
                                 break
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 import json
+
                                 data = json.loads(msg.data)
                                 if data.get("e") == "trade":
                                     event = DataNormalizer.binance_ws_trade_to_event(data)
@@ -408,15 +438,21 @@ class BinanceDataProvider:
         count: int = 1000,
     ) -> List[BarEvent]:
         tf_map = {
-            "M1":"1m","M5":"5m","M15":"15m","M30":"30m",
-            "H1":"1h","H4":"4h","D1":"1d",
+            "M1": "1m",
+            "M5": "5m",
+            "M15": "15m",
+            "M30": "30m",
+            "H1": "1h",
+            "H4": "4h",
+            "D1": "1d",
         }
         interval = tf_map.get(timeframe, "1h")
         start_ms = int(start.timestamp() * 1000)
-        end_ms   = int(end.timestamp() * 1000)
+        end_ms = int(end.timestamp() * 1000)
 
         try:
             import aiohttp
+
             url = f"{self.BASE_REST}/klines"
             params = {
                 "symbol": symbol.upper(),
@@ -431,19 +467,21 @@ class BinanceDataProvider:
                     bars = []
                     for i, k in enumerate(data):
                         ts = datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc)
-                        bars.append(BarEvent(
-                            source="binance",
-                            symbol=symbol,
-                            timeframe=timeframe,
-                            open=float(k[1]),
-                            high=float(k[2]),
-                            low=float(k[3]),
-                            close=float(k[4]),
-                            volume=float(k[5]),
-                            timestamp=ts,
-                            bar_index=i,
-                            is_closed=True,
-                        ))
+                        bars.append(
+                            BarEvent(
+                                source="binance",
+                                symbol=symbol,
+                                timeframe=timeframe,
+                                open=float(k[1]),
+                                high=float(k[2]),
+                                low=float(k[3]),
+                                close=float(k[4]),
+                                volume=float(k[5]),
+                                timestamp=ts,
+                                bar_index=i,
+                                is_closed=True,
+                            )
+                        )
                     return bars
         except Exception as exc:
             logger.error("Binance historical bars failed: %s", exc)
@@ -459,6 +497,7 @@ class BinanceDataProvider:
 # ---------------------------------------------------------------------------
 # Historical Data Manager
 # ---------------------------------------------------------------------------
+
 
 class HistoricalDataManager:
     """
@@ -496,7 +535,7 @@ class HistoricalDataManager:
             return self._memory_cache[cache_key].iloc[-lookback_bars:]
 
         end = end or datetime.now(timezone.utc)
-        minutes_map = {"M1":1,"M5":5,"M15":15,"M30":30,"H1":60,"H4":240,"D1":1440}
+        minutes_map = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
         minutes = minutes_map.get(timeframe, 60)
         start = end - timedelta(minutes=minutes * lookback_bars * 1.5)  # extra buffer
 
@@ -504,23 +543,33 @@ class HistoricalDataManager:
         symbol_upper = symbol.upper()
 
         # Route to correct provider based on asset class
-        is_crypto = any(symbol_upper.startswith(c) for c in ["BTC","ETH","BNB","XRP","SOL","ADA","DOT","LINK"])
+        is_crypto = any(
+            symbol_upper.startswith(c)
+            for c in ["BTC", "ETH", "BNB", "XRP", "SOL", "ADA", "DOT", "LINK"]
+        )
 
         if is_crypto and self._binance:
-            bars = await self._binance.get_historical_bars(symbol, timeframe, start, end, lookback_bars)
+            bars = await self._binance.get_historical_bars(
+                symbol, timeframe, start, end, lookback_bars
+            )
         elif self._mt5:
             bars = await self._mt5.get_historical_bars(symbol, timeframe, start, end, lookback_bars)
 
         if not bars:
-            logger.warning("No bars returned for %s %s — returning empty DataFrame", symbol, timeframe)
+            logger.warning(
+                "No bars returned for %s %s — returning empty DataFrame", symbol, timeframe
+            )
             return pd.DataFrame()
 
         df = DataNormalizer.ohlcv_to_dataframe(bars)
         self._memory_cache[cache_key] = df
         logger.info(
             "Loaded %d bars for %s %s (%.4f → %.4f)",
-            len(df), symbol, timeframe,
-            df["close"].iloc[0], df["close"].iloc[-1],
+            len(df),
+            symbol,
+            timeframe,
+            df["close"].iloc[0],
+            df["close"].iloc[-1],
         )
         return df.iloc[-lookback_bars:]
 
@@ -528,10 +577,15 @@ class HistoricalDataManager:
         """Append a new closed bar to the cached DataFrame and return updated DF."""
         cache_key = f"{symbol}:{timeframe}"
         new_row = pd.DataFrame(
-            [{
-                "open": new_bar.open, "high": new_bar.high,
-                "low": new_bar.low, "close": new_bar.close, "volume": new_bar.volume,
-            }],
+            [
+                {
+                    "open": new_bar.open,
+                    "high": new_bar.high,
+                    "low": new_bar.low,
+                    "close": new_bar.close,
+                    "volume": new_bar.volume,
+                }
+            ],
             index=pd.DatetimeIndex([new_bar.timestamp], tz="UTC"),
         )
         if cache_key in self._memory_cache:

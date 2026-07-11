@@ -29,21 +29,18 @@ from __future__ import annotations
 
 import logging
 import time
-from copy import deepcopy
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from decimal import Decimal
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import numpy as np
 import pandas as pd
 
-from core.domain.events import BarEvent, FillEvent, SignalEvent, OrderEvent
+from config.settings import get_settings
+from core.domain.events import BarEvent, FillEvent, OrderEvent, SignalEvent
 from indicator_engine.service import IndicatorService
 from portfolio_engine.service import PortfolioEngine
-from risk_engine.service import RiskEngine
 from strategy_engine.service import BaseStrategy
-from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -53,19 +50,21 @@ settings = get_settings()
 # Backtest configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BacktestConfig:
     initial_capital: float = 100_000.0
-    commission_per_lot: float = 7.0          # USD per standard lot (round-trip)
-    slippage_bps: float = 1.0                # basis points of ATR
-    spread_bps: float = 2.0                  # simulated bid-ask spread
-    risk_free_rate: float = 0.05             # annualised, for Sharpe calculation
+    commission_per_lot: float = 7.0  # USD per standard lot (round-trip)
+    slippage_bps: float = 1.0  # basis points of ATR
+    spread_bps: float = 2.0  # simulated bid-ask spread
+    risk_free_rate: float = 0.05  # annualised, for Sharpe calculation
     trading_days_per_year: int = 252
 
 
 # ---------------------------------------------------------------------------
 # Performance statistics
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BacktestStats:
@@ -78,10 +77,10 @@ class BacktestStats:
     daily_return_std: float = 0.0
 
     # Risk-adjusted
-    sharpe_ratio: float = 0.0         # (return - Rf) / std
-    sortino_ratio: float = 0.0        # (return - Rf) / downside_std
-    calmar_ratio: float = 0.0         # annualised_return / max_drawdown
-    omega_ratio: float = 0.0          # E[gains above threshold] / E[losses below]
+    sharpe_ratio: float = 0.0  # (return - Rf) / std
+    sortino_ratio: float = 0.0  # (return - Rf) / downside_std
+    calmar_ratio: float = 0.0  # annualised_return / max_drawdown
+    omega_ratio: float = 0.0  # E[gains above threshold] / E[losses below]
 
     # Drawdown
     max_drawdown_pct: float = 0.0
@@ -93,7 +92,7 @@ class BacktestStats:
     winning_trades: int = 0
     losing_trades: int = 0
     win_rate_pct: float = 0.0
-    profit_factor: float = 0.0       # gross_profit / gross_loss
+    profit_factor: float = 0.0  # gross_profit / gross_loss
     avg_win: float = 0.0
     avg_loss: float = 0.0
     avg_trade_return: float = 0.0
@@ -125,26 +124,24 @@ def compute_statistics(
 
     stats.total_bars = len(equity_curve)
     stats.start_date = str(equity_curve.index[0])
-    stats.end_date   = str(equity_curve.index[-1])
+    stats.end_date = str(equity_curve.index[-1])
 
     # Returns
     returns = equity_curve.pct_change().dropna()
     total_days = (equity_curve.index[-1] - equity_curve.index[0]).days or 1
     years = total_days / 365.25
 
-    stats.total_return_pct = float(
-        (equity_curve.iloc[-1] / equity_curve.iloc[0] - 1) * 100
+    stats.total_return_pct = float((equity_curve.iloc[-1] / equity_curve.iloc[0] - 1) * 100)
+    stats.annualised_return_pct = (
+        float(((1 + stats.total_return_pct / 100) ** (1 / years) - 1) * 100) if years > 0 else 0.0
     )
-    stats.annualised_return_pct = float(
-        ((1 + stats.total_return_pct / 100) ** (1 / years) - 1) * 100
-    ) if years > 0 else 0.0
 
     stats.daily_return_mean = float(returns.mean())
-    stats.daily_return_std  = float(returns.std())
+    stats.daily_return_std = float(returns.std())
 
     # Risk-adjusted ratios
     rf_daily = config.risk_free_rate / config.trading_days_per_year
-    excess   = returns - rf_daily
+    excess = returns - rf_daily
     downside = returns[returns < rf_daily]
 
     if stats.daily_return_std > 0:
@@ -158,9 +155,11 @@ def compute_statistics(
 
     # Drawdown
     rolling_max = equity_curve.cummax()
-    drawdown    = (equity_curve - rolling_max) / rolling_max
+    drawdown = (equity_curve - rolling_max) / rolling_max
     stats.max_drawdown_pct = float(drawdown.min() * 100)
-    stats.avg_drawdown_pct = float(drawdown[drawdown < 0].mean() * 100) if (drawdown < 0).any() else 0.0
+    stats.avg_drawdown_pct = (
+        float(drawdown[drawdown < 0].mean() * 100) if (drawdown < 0).any() else 0.0
+    )
 
     # Drawdown duration
     in_dd = drawdown < 0
@@ -176,7 +175,7 @@ def compute_statistics(
         stats.calmar_ratio = float(stats.annualised_return_pct / abs(stats.max_drawdown_pct))
 
     # Omega ratio (threshold = risk-free rate)
-    gains  = returns[returns > rf_daily] - rf_daily
+    gains = returns[returns > rf_daily] - rf_daily
     losses = rf_daily - returns[returns < rf_daily]
     if losses.sum() > 0:
         stats.omega_ratio = float(gains.sum() / losses.sum())
@@ -192,26 +191,28 @@ def compute_statistics(
         pnl = getattr(fill, "realised_pnl", 0.0)
         trade_pnls.append(pnl)
         total_commission += fill.commission
-        total_slippage   += getattr(fill, "slippage", 0.0)
+        total_slippage += getattr(fill, "slippage", 0.0)
         if pnl > 0:
             gross_profit += pnl
         else:
             gross_loss += abs(pnl)
 
-    stats.total_trades  = len(fills)
+    stats.total_trades = len(fills)
     stats.winning_trades = sum(1 for p in trade_pnls if p > 0)
-    stats.losing_trades  = sum(1 for p in trade_pnls if p <= 0)
-    stats.win_rate_pct   = (stats.winning_trades / stats.total_trades * 100) if stats.total_trades else 0.0
-    stats.profit_factor  = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+    stats.losing_trades = sum(1 for p in trade_pnls if p <= 0)
+    stats.win_rate_pct = (
+        (stats.winning_trades / stats.total_trades * 100) if stats.total_trades else 0.0
+    )
+    stats.profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
     winners = [p for p in trade_pnls if p > 0]
-    losers  = [p for p in trade_pnls if p <= 0]
-    stats.avg_win  = float(np.mean(winners)) if winners else 0.0
-    stats.avg_loss = float(np.mean(losers))  if losers  else 0.0
+    losers = [p for p in trade_pnls if p <= 0]
+    stats.avg_win = float(np.mean(winners)) if winners else 0.0
+    stats.avg_loss = float(np.mean(losers)) if losers else 0.0
     stats.avg_trade_return = float(np.mean(trade_pnls)) if trade_pnls else 0.0
-    stats.best_trade  = float(max(trade_pnls)) if trade_pnls else 0.0
+    stats.best_trade = float(max(trade_pnls)) if trade_pnls else 0.0
     stats.worst_trade = float(min(trade_pnls)) if trade_pnls else 0.0
     stats.total_commission = total_commission
-    stats.total_slippage   = total_slippage
+    stats.total_slippage = total_slippage
 
     return stats
 
@@ -219,6 +220,7 @@ def compute_statistics(
 # ---------------------------------------------------------------------------
 # Simulated Execution (no broker connection)
 # ---------------------------------------------------------------------------
+
 
 class SimulatedExecution:
     """
@@ -276,6 +278,7 @@ class SimulatedExecution:
 # Backtest Engine
 # ---------------------------------------------------------------------------
 
+
 class BacktestEngine:
     """
     Event-driven backtesting engine.
@@ -326,13 +329,16 @@ class BacktestEngine:
 
         logger.info(
             "Backtest starting: %s %s | %d bars | capital=%.2f",
-            symbol, timeframe, len(bars), self.config.initial_capital,
+            symbol,
+            timeframe,
+            len(bars),
+            self.config.initial_capital,
         )
 
         # Initialise components
         indicator_svc = IndicatorService()
-        portfolio     = PortfolioEngine(initial_capital=self.config.initial_capital)
-        execution     = SimulatedExecution(self.config)
+        portfolio = PortfolioEngine(initial_capital=self.config.initial_capital)
+        execution = SimulatedExecution(self.config)
         strategy.reset()
 
         # Pre-compute all indicators on the full series (warm-up)
@@ -342,10 +348,17 @@ class BacktestEngine:
         bar_log: List[dict] = []
         bars_list = [
             BarEvent(
-                source="backtest", symbol=symbol, timeframe=timeframe,
-                open=row["open"], high=row["high"], low=row["low"],
-                close=row["close"], volume=row["volume"],
-                timestamp=ts, bar_index=i, is_closed=True,
+                source="backtest",
+                symbol=symbol,
+                timeframe=timeframe,
+                open=row["open"],
+                high=row["high"],
+                low=row["low"],
+                close=row["close"],
+                volume=row["volume"],
+                timestamp=ts,
+                bar_index=i,
+                is_closed=True,
             )
             for i, (ts, row) in enumerate(bars.iterrows())
         ]
@@ -363,9 +376,13 @@ class BacktestEngine:
 
             # --- Update unrealised P&L ---
             from core.domain.events import TickEvent
+
             synthetic_tick = TickEvent(
-                source="backtest", symbol=symbol,
-                bid=bar.close, ask=bar.close, volume=bar.volume,
+                source="backtest",
+                symbol=symbol,
+                bid=bar.close,
+                ask=bar.close,
+                volume=bar.volume,
                 timestamp=bar.timestamp,
             )
             await portfolio.on_tick(synthetic_tick)
@@ -375,7 +392,7 @@ class BacktestEngine:
             equity_curve.append((bar.timestamp, equity))
 
             # --- Compute indicators for sub-window up to current bar ---
-            sub_df = bars.iloc[max(0, idx - 499): idx + 1]
+            sub_df = bars.iloc[max(0, idx - 499) : idx + 1]
             if len(sub_df) >= 30:
                 indicator_svc.compute_all(symbol, timeframe, sub_df)
 
@@ -402,13 +419,15 @@ class BacktestEngine:
                     )
                     pending_orders.append(order)
 
-            bar_log.append({
-                "timestamp": bar.timestamp.isoformat(),
-                "close": bar.close,
-                "equity": equity,
-                "signal": signal.direction if signal else None,
-                "open_positions": len(portfolio.get_positions()),
-            })
+            bar_log.append(
+                {
+                    "timestamp": bar.timestamp.isoformat(),
+                    "close": bar.close,
+                    "equity": equity,
+                    "signal": signal.direction if signal else None,
+                    "open_positions": len(portfolio.get_positions()),
+                }
+            )
 
         # Build equity Series
         ts_index = pd.DatetimeIndex([t for t, _ in equity_curve], tz="UTC")
@@ -421,8 +440,10 @@ class BacktestEngine:
 
         logger.info(
             "Backtest complete in %.2fs | total_return=%.2f%% Sharpe=%.2f MaxDD=%.2f%%",
-            stats.runtime_seconds, stats.total_return_pct,
-            stats.sharpe_ratio, stats.max_drawdown_pct,
+            stats.runtime_seconds,
+            stats.total_return_pct,
+            stats.sharpe_ratio,
+            stats.max_drawdown_pct,
         )
 
         return {
@@ -454,24 +475,26 @@ class BacktestEngine:
         This expanding-IS design is more conservative than rolling IS because
         the strategy sees more data over time (typical for trend-following).
         """
-        results = []
         total_bars = len(bars)
         split_results: List[Dict[str, Any]] = []
 
         for split in range(n_splits):
-            is_end   = in_sample_bars + split * out_of_sample_bars
+            is_end = in_sample_bars + split * out_of_sample_bars
             oos_start = is_end
-            oos_end   = oos_start + out_of_sample_bars
+            oos_end = oos_start + out_of_sample_bars
 
             if oos_end > total_bars:
                 break
 
-            is_bars  = bars.iloc[:is_end]
+            is_bars = bars.iloc[:is_end]
             oos_bars = bars.iloc[oos_start:oos_end]
 
             logger.info(
                 "Walk-forward split %d/%d | IS=%d bars | OOS=%d bars",
-                split + 1, n_splits, len(is_bars), len(oos_bars),
+                split + 1,
+                n_splits,
+                len(is_bars),
+                len(oos_bars),
             )
 
             # Run on OOS (in a real WFO, IS is used to optimise params first)
@@ -488,14 +511,16 @@ class BacktestEngine:
 
         sharpe_values = [r["stats"]["sharpe_ratio"] for r in split_results if "stats" in r]
         return_values = [r["stats"]["total_return_pct"] for r in split_results if "stats" in r]
-        dd_values     = [r["stats"]["max_drawdown_pct"] for r in split_results if "stats" in r]
+        dd_values = [r["stats"]["max_drawdown_pct"] for r in split_results if "stats" in r]
 
         summary = {
             "n_splits": len(split_results),
-            "avg_oos_sharpe":  float(np.mean(sharpe_values)),
-            "avg_oos_return":  float(np.mean(return_values)),
-            "avg_oos_max_dd":  float(np.mean(dd_values)),
-            "consistency_pct": float(sum(1 for r in return_values if r > 0) / len(return_values) * 100),
+            "avg_oos_sharpe": float(np.mean(sharpe_values)),
+            "avg_oos_return": float(np.mean(return_values)),
+            "avg_oos_max_dd": float(np.mean(dd_values)),
+            "consistency_pct": float(
+                sum(1 for r in return_values if r > 0) / len(return_values) * 100
+            ),
             "split_results": [
                 {
                     "split": r["split"],
@@ -504,7 +529,8 @@ class BacktestEngine:
                     "max_dd": r["stats"]["max_drawdown_pct"],
                     "win_rate": r["stats"]["win_rate_pct"],
                 }
-                for r in split_results if "stats" in r
+                for r in split_results
+                if "stats" in r
             ],
         }
         return summary

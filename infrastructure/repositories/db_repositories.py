@@ -12,12 +12,11 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
 
 import asyncpg
 
 from config.settings import get_settings
-from core.domain.events import FillEvent, OrderEvent, BarEvent
+from core.domain.events import BarEvent, FillEvent, OrderEvent
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +32,16 @@ class ConnectionPool:
             settings = get_settings()
             cls._pool = await asyncpg.create_pool(
                 # FIX DEPLOY-05: was settings.database.url (does not exist)
-                dsn      = settings.database.asyncpg_dsn,
-                min_size = settings.database.pool_min,
-                max_size = settings.database.pool_max,
-                timeout  = settings.database.pool_timeout,
-                command_timeout = 60,
+                dsn=settings.database.asyncpg_dsn,
+                min_size=settings.database.pool_min,
+                max_size=settings.database.pool_max,
+                timeout=settings.database.pool_timeout,
+                command_timeout=60,
             )
             logger.info(
                 "asyncpg connection pool created",
                 extra={
-                    "host":     settings.database.host,
+                    "host": settings.database.host,
                     "database": settings.database.name,
                     "pool_min": settings.database.pool_min,
                     "pool_max": settings.database.pool_max,
@@ -79,7 +78,7 @@ class OrderRepository:
                 order.side,
                 float(order.quantity),
                 float(order.limit_price) if order.limit_price else None,
-                float(order.stop_price)  if order.stop_price  else None,
+                float(order.stop_price) if order.stop_price else None,
                 order.strategy_id,
                 order.algorithm,
                 order.risk_approved,
@@ -157,7 +156,8 @@ class FillRepository:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM fills WHERE symbol=$1 ORDER BY filled_at DESC LIMIT $2",
-                symbol, limit,
+                symbol,
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -187,9 +187,9 @@ class BarRepository:
 
     async def get_bars(
         self,
-        symbol:    str,
+        symbol: str,
         timeframe: str,
-        limit:     int = 500,
+        limit: int = 500,
     ) -> list[dict]:
         pool = await ConnectionPool.get_pool()
         async with pool.acquire() as conn:
@@ -200,7 +200,9 @@ class BarRepository:
                 ORDER BY time DESC
                 LIMIT $3
                 """,
-                symbol, timeframe, limit,
+                symbol,
+                timeframe,
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -210,11 +212,11 @@ class PortfolioSnapshotRepository:
 
     async def save_snapshot(
         self,
-        equity:        float,
-        cash:          float,
-        realised_pnl:  float,
+        equity: float,
+        cash: float,
+        realised_pnl: float,
         unrealised_pnl: float,
-        drawdown_pct:  float,
+        drawdown_pct: float,
         open_positions: int,
     ) -> None:
         pool = await ConnectionPool.get_pool()
@@ -227,6 +229,10 @@ class PortfolioSnapshotRepository:
                 VALUES ($1,$2,$3,$4,$5,$6,$7)
                 """,
                 datetime.now(timezone.utc),
-                equity, cash, realised_pnl, unrealised_pnl,
-                drawdown_pct, open_positions,
+                equity,
+                cash,
+                realised_pnl,
+                unrealised_pnl,
+                drawdown_pct,
+                open_positions,
             )

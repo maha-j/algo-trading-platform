@@ -12,17 +12,16 @@ Fixes applied (BUG-05, BUG-08, SEC-01, SEC-02, CONTRACT-01):
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import structlog
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, WebSocket
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from config.settings import get_settings
 
@@ -55,10 +54,12 @@ ACTIVE_WEBSOCKETS = Gauge(
 # JWT helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _decode_token(token: str) -> dict:
     """Validate and decode a JWT. Raises HTTPException on failure."""
     try:
         import jwt as pyjwt
+
         settings = get_settings()
         return pyjwt.decode(
             token,
@@ -72,6 +73,7 @@ def _decode_token(token: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # Application Lifespan
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -91,12 +93,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     logger.info(
         "Trading platform API starting",
-        environment = settings.environment,
-        version     = settings.version,
+        environment=settings.environment,
+        version=settings.version,
     )
 
     try:
         from infrastructure.container import TradingPlatformContainer
+
         container = TradingPlatformContainer()
         await container.start()
         app.state.container = container
@@ -116,27 +119,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # Application Factory
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def create_app() -> FastAPI:
     """Application factory — creates and configures the FastAPI instance."""
     settings = get_settings()
 
     app = FastAPI(
-        title       = "Institutional Algorithmic Trading Platform",
-        description = "Multi-asset algorithmic trading: Forex, Crypto, Stocks, Futures",
-        version     = settings.version,
-        docs_url    = "/api/docs"        if not settings.is_production() else None,
-        redoc_url   = "/api/redoc"       if not settings.is_production() else None,
-        openapi_url = "/api/openapi.json" if not settings.is_production() else None,
-        lifespan    = lifespan,
+        title="Institutional Algorithmic Trading Platform",
+        description="Multi-asset algorithmic trading: Forex, Crypto, Stocks, Futures",
+        version=settings.version,
+        docs_url="/api/docs" if not settings.is_production() else None,
+        redoc_url="/api/redoc" if not settings.is_production() else None,
+        openapi_url="/api/openapi.json" if not settings.is_production() else None,
+        lifespan=lifespan,
     )
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
-        allow_origins      = settings.api.cors_origins,
-        allow_credentials  = True,
-        allow_methods      = ["GET", "POST", "PUT", "DELETE", "PATCH"],
-        allow_headers      = ["*"],
+        allow_origins=settings.api.cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        allow_headers=["*"],
     )
 
     # ── Request logging + correlation ID ─────────────────────────────────────
@@ -145,11 +149,11 @@ def create_app() -> FastAPI:
         correlation_id = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
         request.state.correlation_id = correlation_id
 
-        start    = time.monotonic()
+        start = time.monotonic()
         response = await call_next(request)
-        elapsed  = time.monotonic() - start
+        elapsed = time.monotonic() - start
 
-        path   = request.url.path
+        path = request.url.path
         method = request.method
         status = response.status_code
 
@@ -158,15 +162,15 @@ def create_app() -> FastAPI:
 
         logger.info(
             "HTTP request",
-            method         = method,
-            path           = path,
-            status         = status,
-            duration_ms    = round(elapsed * 1000, 2),
-            correlation_id = correlation_id,
+            method=method,
+            path=path,
+            status=status,
+            duration_ms=round(elapsed * 1000, 2),
+            correlation_id=correlation_id,
         )
 
         response.headers["X-Correlation-ID"] = correlation_id
-        response.headers["X-Response-Time"]  = f"{elapsed:.4f}s"
+        response.headers["X-Response-Time"] = f"{elapsed:.4f}s"
         return response
 
     # ── System routes ─────────────────────────────────────────────────────────
@@ -185,8 +189,8 @@ def create_app() -> FastAPI:
         container = getattr(request.app.state, "container", None)
         if container is None:
             return JSONResponse(
-                status_code = 503,
-                content     = {"status": "degraded", "reason": "container not initialised"},
+                status_code=503,
+                content={"status": "degraded", "reason": "container not initialised"},
             )
 
         try:
@@ -202,6 +206,7 @@ def create_app() -> FastAPI:
 
         try:
             from infrastructure.repositories.db_repositories import ConnectionPool
+
             pool = await ConnectionPool.get_pool()
             async with pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
@@ -211,8 +216,8 @@ def create_app() -> FastAPI:
             all_ok = False
 
         return JSONResponse(
-            status_code = 200 if all_ok else 503,
-            content     = {"status": "ok" if all_ok else "degraded", "checks": checks},
+            status_code=200 if all_ok else 503,
+            content={"status": "ok" if all_ok else "degraded", "checks": checks},
         )
 
     @app.get("/metrics", tags=["System"])
@@ -231,20 +236,20 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(market_data_router, prefix="/api/v1/market-data", tags=["Market Data"])
-    app.include_router(strategies_router,  prefix="/api/v1/strategies",  tags=["Strategies"])
-    app.include_router(orders_router,      prefix="/api/v1/orders",      tags=["Orders"])
-    app.include_router(portfolio_router,   prefix="/api/v1/portfolio",   tags=["Portfolio"])
-    app.include_router(risk_router,        prefix="/api/v1/risk",        tags=["Risk"])
-    app.include_router(backtest_router,    prefix="/api/v1/backtest",    tags=["Backtest"])
+    app.include_router(strategies_router, prefix="/api/v1/strategies", tags=["Strategies"])
+    app.include_router(orders_router, prefix="/api/v1/orders", tags=["Orders"])
+    app.include_router(portfolio_router, prefix="/api/v1/portfolio", tags=["Portfolio"])
+    app.include_router(risk_router, prefix="/api/v1/risk", tags=["Risk"])
+    app.include_router(backtest_router, prefix="/api/v1/backtest", tags=["Backtest"])
 
     # ── WebSocket Endpoints ───────────────────────────────────────────────────
 
     @app.websocket("/ws/market-data/{symbol}")
     async def market_data_ws(
         websocket: WebSocket,
-        symbol:    str,
+        symbol: str,
         # FIX SEC-01: JWT required as query param for WebSocket auth
-        token:     str = Query(..., description="JWT access token"),
+        token: str = Query(..., description="JWT access token"),
     ) -> None:
         """
         Real-time market data feed via WebSocket.
@@ -268,11 +273,7 @@ def create_app() -> FastAPI:
             ACTIVE_WEBSOCKETS.labels(channel="market-data").dec()
             return
 
-        pubsub = (
-            container.event_bus._client.pubsub()
-            if container.event_bus._client
-            else None
-        )
+        pubsub = container.event_bus._client.pubsub() if container.event_bus._client else None
 
         try:
             if pubsub:
@@ -316,7 +317,7 @@ def create_app() -> FastAPI:
     async def portfolio_ws(
         websocket: WebSocket,
         # FIX SEC-01: JWT required for portfolio WebSocket
-        token:     str = Query(..., description="JWT access token"),
+        token: str = Query(..., description="JWT access token"),
     ) -> None:
         """
         Real-time portfolio updates via WebSocket.
@@ -347,15 +348,17 @@ def create_app() -> FastAPI:
                     # FIX CONTRACT-01: get_positions/get_equity are sync — no await
                     summary = container.portfolio_engine.get_summary()
 
-                    await websocket.send_json({
-                        "type":            "PORTFOLIO_UPDATE",
-                        "equity":          summary["equity"],
-                        "realised_pnl":    summary["realised_pnl"],
-                        "unrealised_pnl":  summary["unrealised_pnl"],
-                        "drawdown_pct":    summary["drawdown_pct"],
-                        "open_positions":  summary["open_positions"],
-                        "positions":       summary["positions"],
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "PORTFOLIO_UPDATE",
+                            "equity": summary["equity"],
+                            "realised_pnl": summary["realised_pnl"],
+                            "unrealised_pnl": summary["unrealised_pnl"],
+                            "drawdown_pct": summary["drawdown_pct"],
+                            "open_positions": summary["open_positions"],
+                            "positions": summary["positions"],
+                        }
+                    )
                 except Exception as exc:
                     logger.error(f"Portfolio WS update error: {exc}")
 

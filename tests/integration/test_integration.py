@@ -18,20 +18,19 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone, timedelta
-from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 from typing import List
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
-import pytest_asyncio
 
 # Skip all integration tests if Redis is not reachable
 REDIS_AVAILABLE = False
 try:
     import redis as redis_sync
+
     client = redis_sync.Redis(
         host=os.getenv("REDIS_HOST", "localhost"),
         port=int(os.getenv("REDIS_PORT", "6379")),
@@ -55,6 +54,7 @@ skip_no_redis = pytest.mark.skipif(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def synthetic_bars() -> pd.DataFrame:
     """1000-bar synthetic GBM price series."""
@@ -64,13 +64,15 @@ def synthetic_bars() -> pd.DataFrame:
     rows = []
     now = datetime.now(timezone.utc)
     for i in range(n):
-        ret  = np.random.normal(0, 0.001)
-        o    = price
+        ret = np.random.normal(0, 0.001)
+        o = price
         price *= np.exp(ret)
-        c    = price
-        h    = max(o, c) * (1 + abs(np.random.normal(0, 0.0003)))
-        l    = min(o, c) * (1 - abs(np.random.normal(0, 0.0003)))
-        rows.append({"open": o, "high": h, "low": l, "close": c, "volume": np.random.uniform(500, 2000)})
+        c = price
+        h = max(o, c) * (1 + abs(np.random.normal(0, 0.0003)))
+        lo = min(o, c) * (1 - abs(np.random.normal(0, 0.0003)))
+        rows.append(
+            {"open": o, "high": h, "low": lo, "close": c, "volume": np.random.uniform(500, 2000)}
+        )
 
     idx = pd.date_range(now - timedelta(hours=n), periods=n, freq="1h", tz="UTC")
     return pd.DataFrame(rows, index=idx)
@@ -80,15 +82,16 @@ def synthetic_bars() -> pd.DataFrame:
 # Redis Event Bus Integration
 # ===========================================================================
 
+
 @skip_no_redis
 class TestRedisEventBus:
-
     @pytest.mark.asyncio
     async def test_publish_and_consume_roundtrip(self):
         """Publish a TickEvent, verify the consumer receives it."""
         import redis.asyncio as aioredis
-        from infrastructure.event_bus.redis_event_bus import RedisEventBus
+
         from core.domain.events import TickEvent
+        from infrastructure.event_bus.redis_event_bus import RedisEventBus
 
         client = aioredis.Redis(
             host=os.getenv("REDIS_HOST", "localhost"),
@@ -123,8 +126,9 @@ class TestRedisEventBus:
     async def test_publish_many_batch(self):
         """publish_many must publish N events in a single pipeline."""
         import redis.asyncio as aioredis
-        from infrastructure.event_bus.redis_event_bus import RedisEventBus
+
         from core.domain.events import BarEvent
+        from infrastructure.event_bus.redis_event_bus import RedisEventBus
 
         client = aioredis.Redis(
             host=os.getenv("REDIS_HOST", "localhost"),
@@ -136,9 +140,16 @@ class TestRedisEventBus:
         bus = RedisEventBus(client, group="test_batch_grp", consumer_name="batch_consumer")
         events = [
             BarEvent(
-                source="test", symbol="EURUSD", timeframe="H1",
-                open=1.085, high=1.086, low=1.084, close=1.0855,
-                volume=1000, bar_index=i, is_closed=True,
+                source="test",
+                symbol="EURUSD",
+                timeframe="H1",
+                open=1.085,
+                high=1.086,
+                low=1.084,
+                close=1.0855,
+                volume=1000,
+                bar_index=i,
+                is_closed=True,
             )
             for i in range(50)
         ]
@@ -151,6 +162,7 @@ class TestRedisEventBus:
 # ===========================================================================
 # Full Signal Flow Integration
 # ===========================================================================
+
 
 class TestSignalFlowIntegration:
     """
@@ -167,11 +179,16 @@ class TestSignalFlowIntegration:
     @pytest.fixture
     def mock_broker(self):
         from core.domain.events import FillEvent
+
         broker = AsyncMock()
         fill = FillEvent(
-            source="test", order_id="test_order_1",
-            symbol="EURUSD", side="BUY", quantity=10000.0,
-            fill_price=1.08510, commission=7.0,
+            source="test",
+            order_id="test_order_1",
+            symbol="EURUSD",
+            side="BUY",
+            quantity=10000.0,
+            fill_price=1.08510,
+            commission=7.0,
         )
         broker.submit_market_order = AsyncMock(return_value=fill)
         broker.connect = AsyncMock(return_value=True)
@@ -180,24 +197,33 @@ class TestSignalFlowIntegration:
     @pytest.mark.asyncio
     async def test_ema_crossover_generates_signal(self, synthetic_bars):
         """Strategy must generate at least one signal on 1000 bars."""
-        from strategy_engine.service import EMACrossoverStrategy
         from indicator_engine.service import IndicatorService
+        from strategy_engine.service import EMACrossoverStrategy
 
         strategy = EMACrossoverStrategy(config={"fast_period": 9, "slow_period": 21})
-        ind_svc   = IndicatorService()
+        ind_svc = IndicatorService()
 
         # Warm up indicators
         ind_svc.compute_all("EURUSD", "H1", synthetic_bars)
 
         from core.domain.events import BarEvent
+
         signals = []
         for i, (ts, row) in enumerate(synthetic_bars.iterrows()):
             bar = BarEvent(
-                source="test", symbol="EURUSD", timeframe="H1",
-                open=row.open, high=row.high, low=row.low, close=row.close,
-                volume=row.volume, timestamp=ts, bar_index=i, is_closed=True,
+                source="test",
+                symbol="EURUSD",
+                timeframe="H1",
+                open=row.open,
+                high=row.high,
+                low=row.low,
+                close=row.close,
+                volume=row.volume,
+                timestamp=ts,
+                bar_index=i,
+                is_closed=True,
             )
-            sub_df = synthetic_bars.iloc[max(0, i-100):i+1]
+            sub_df = synthetic_bars.iloc[max(0, i - 100) : i + 1]
             if len(sub_df) >= 30:
                 ind_svc.compute_all("EURUSD", "H1", sub_df)
             signal = await strategy.on_bar(bar, ind_svc)
@@ -214,23 +240,29 @@ class TestSignalFlowIntegration:
     @pytest.mark.asyncio
     async def test_portfolio_tracks_multiple_fills(self, synthetic_bars):
         """Portfolio must correctly aggregate P&L across multiple round-trips."""
-        from portfolio_engine.service import PortfolioEngine
         from core.domain.events import FillEvent
+        from portfolio_engine.service import PortfolioEngine
 
         portfolio = PortfolioEngine(initial_capital=100_000.0)
-        total_pnl = 0.0
 
         trades = [
-            ("BUY",  10000, 1.08500), ("SELL", 10000, 1.09000),   # +50 - 14 comm = +36
-            ("BUY",  10000, 1.09000), ("SELL", 10000, 1.08500),   # -50 - 14 comm = -64
-            ("SELL", 10000, 1.09500), ("BUY",  10000, 1.09000),   # +50 - 14 comm = +36
+            ("BUY", 10000, 1.08500),
+            ("SELL", 10000, 1.09000),  # +50 - 14 comm = +36
+            ("BUY", 10000, 1.09000),
+            ("SELL", 10000, 1.08500),  # -50 - 14 comm = -64
+            ("SELL", 10000, 1.09500),
+            ("BUY", 10000, 1.09000),  # +50 - 14 comm = +36
         ]
 
         for side, qty, price in trades:
             fill = FillEvent(
-                source="test", order_id=f"o_{len(trades)}",
-                symbol="EURUSD", side=side, quantity=float(qty),
-                fill_price=price, commission=7.0,
+                source="test",
+                order_id=f"o_{len(trades)}",
+                symbol="EURUSD",
+                side=side,
+                quantity=float(qty),
+                fill_price=price,
+                commission=7.0,
             )
             await portfolio.on_fill(fill)
 
@@ -244,17 +276,17 @@ class TestSignalFlowIntegration:
 # Backtest Engine Integration
 # ===========================================================================
 
-class TestBacktestEngineIntegration:
 
+class TestBacktestEngineIntegration:
     @pytest.mark.asyncio
     @pytest.mark.slow
     async def test_full_backtest_on_synthetic_data(self, synthetic_bars):
         """Full backtest must complete without errors and return valid stats."""
-        from backtest_engine.service import BacktestEngine, BacktestConfig
+        from backtest_engine.service import BacktestConfig, BacktestEngine
         from strategy_engine.service import EMACrossoverStrategy
 
-        config   = BacktestConfig(initial_capital=100_000.0)
-        engine   = BacktestEngine(config)
+        config = BacktestConfig(initial_capital=100_000.0)
+        engine = BacktestEngine(config)
         strategy = EMACrossoverStrategy(config={"fast_period": 9, "slow_period": 21})
 
         result = await engine.run(strategy, synthetic_bars, "EURUSD", "H1")
@@ -267,14 +299,14 @@ class TestBacktestEngineIntegration:
         # Statistical sanity checks
         assert isinstance(stats["sharpe_ratio"], float)
         assert isinstance(stats["max_drawdown_pct"], float)
-        assert stats["max_drawdown_pct"] <= 0          # Drawdown always ≤ 0%
+        assert stats["max_drawdown_pct"] <= 0  # Drawdown always ≤ 0%
         assert stats["total_bars"] == len(synthetic_bars)
         assert stats["runtime_seconds"] > 0
 
     @pytest.mark.asyncio
     @pytest.mark.slow
     async def test_walk_forward_produces_multiple_splits(self, synthetic_bars):
-        from backtest_engine.service import BacktestEngine, BacktestConfig
+        from backtest_engine.service import BacktestConfig, BacktestEngine
         from strategy_engine.service import EMACrossoverStrategy
 
         engine = BacktestEngine(BacktestConfig())
@@ -300,15 +332,15 @@ class TestBacktestEngineIntegration:
         Verify that fills use next-bar-open price, not signal-bar-close.
         This is critical for avoiding look-ahead bias.
         """
-        from backtest_engine.service import BacktestEngine, BacktestConfig
+        from backtest_engine.service import BacktestConfig, BacktestEngine
         from strategy_engine.service import EMACrossoverStrategy
 
-        engine   = BacktestEngine(BacktestConfig())
+        engine = BacktestEngine(BacktestConfig())
         strategy = EMACrossoverStrategy(config={})
-        result   = await engine.run(strategy, synthetic_bars[:200], "EURUSD", "H1")
+        result = await engine.run(strategy, synthetic_bars[:200], "EURUSD", "H1")
 
         if result.get("fills"):
-            fill    = result["fills"][0]
+            fill = result["fills"][0]
             fill_ts = fill.timestamp
             # Fill timestamp must correspond to a bar's timestamp (next bar)
             bar_ts = synthetic_bars.index
@@ -319,18 +351,19 @@ class TestBacktestEngineIntegration:
 # Notification Service Integration
 # ===========================================================================
 
-class TestNotificationService:
 
+class TestNotificationService:
     @pytest.mark.asyncio
     async def test_queue_and_deliver_alert(self):
         """Non-blocking alert queue must process messages."""
-        from notification.service import NotificationService, AlertLevel
+        from notification.service import AlertLevel, NotificationService
 
         svc = NotificationService()
         delivered: List[tuple] = []
 
         class MockChannel:
             channel_name = "mock"
+
             async def send(self, subject, body, level):
                 delivered.append((subject, body, level))
                 return True
@@ -349,7 +382,7 @@ class TestNotificationService:
     @pytest.mark.asyncio
     async def test_circuit_breaker_suppresses_channel(self):
         """Channel circuit breaker must stop delivery after threshold failures."""
-        from notification.service import TelegramChannel, ChannelCircuitBreaker, AlertLevel
+        from notification.service import AlertLevel, ChannelCircuitBreaker, TelegramChannel
 
         channel = TelegramChannel.__new__(TelegramChannel)
         channel._token = ""
@@ -357,6 +390,7 @@ class TestNotificationService:
         channel._breaker = ChannelCircuitBreaker(threshold=3)
         channel.channel_name = "telegram"
         from notification.service import TokenBucket
+
         channel._limiter = TokenBucket(rate=100, capacity=100)
 
         # Simulate 3 failures
