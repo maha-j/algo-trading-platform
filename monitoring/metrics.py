@@ -20,31 +20,54 @@ Design decisions
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
 try:
     from prometheus_client import (
-        Counter, Gauge, Histogram, Summary,
-        CollectorRegistry, REGISTRY,
-        generate_latest, CONTENT_TYPE_LATEST,
+        Counter,
+        Gauge,
+        Histogram,
+        Summary,
     )
+
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
+
     # Stub classes so the rest of the code can import without error
     class _Stub:
-        def __init__(self, *a, **kw): pass
-        def labels(self, **kw): return self
-        def inc(self, *a): pass
-        def dec(self, *a): pass
-        def set(self, *a): pass
-        def observe(self, *a): pass
-        def time(self): return self
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def __init__(self, *a, **kw):
+            pass
+
+        def labels(self, **kw):
+            return self
+
+        def inc(self, *a):
+            pass
+
+        def dec(self, *a):
+            pass
+
+        def set(self, *a):
+            pass
+
+        def observe(self, *a):
+            pass
+
+        def time(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     Counter = Gauge = Histogram = Summary = _Stub
 
 logger = logging.getLogger(__name__)
@@ -236,9 +259,6 @@ metrics = TradingMetrics()
 # Structured logging formatter
 # ---------------------------------------------------------------------------
 
-import json
-import logging
-
 
 class JSONFormatter(logging.Formatter):
     """
@@ -249,21 +269,38 @@ class JSONFormatter(logging.Formatter):
     """
 
     RESERVED = {
-        "name", "msg", "args", "levelname", "levelno", "pathname",
-        "filename", "module", "exc_info", "exc_text", "stack_info",
-        "lineno", "funcName", "created", "msecs", "relativeCreated",
-        "thread", "threadName", "processName", "process", "message",
+        "name",
+        "msg",
+        "args",
+        "levelname",
+        "levelno",
+        "pathname",
+        "filename",
+        "module",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "lineno",
+        "funcName",
+        "created",
+        "msecs",
+        "relativeCreated",
+        "thread",
+        "threadName",
+        "processName",
+        "process",
+        "message",
     }
 
     def format(self, record: logging.LogRecord) -> str:
         record.message = record.getMessage()
         log_dict = {
             "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
-            "level":     record.levelname,
-            "logger":    record.name,
-            "message":   record.message,
-            "module":    record.module,
-            "line":      record.lineno,
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.message,
+            "module": record.module,
+            "line": record.lineno,
         }
         # Attach extra fields (e.g. correlation_id, symbol)
         for key, value in record.__dict__.items():
@@ -308,17 +345,16 @@ def configure_logging(level: str = "INFO", json_format: bool = True) -> None:
 # Health check subsystem
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class HealthStatus:
     """Status of a single subsystem."""
+
     name: str
     healthy: bool
     latency_ms: float = 0.0
     message: str = ""
     checked_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-from dataclasses import dataclass, field
 
 
 class HealthChecker:
